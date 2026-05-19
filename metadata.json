@@ -1,0 +1,10 @@
+{
+  "name": "Bouldering AI Pro",
+  "description": "Commercial-grade AI bouldering coach. Real-time posture correction, route analysis, and professional post-climb feedback powered by Gemini Multimodal AI.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
