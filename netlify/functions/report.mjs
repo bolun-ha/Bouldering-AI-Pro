@@ -1,7 +1,9 @@
 // POST /.netlify/functions/report — Session report via GLM-4-Flash
-import { zhipuChat, extractJSON, corsHeaders, handleOptions } from "./_shared.mjs";
+import { zhipuChat, extractJSON, corsHeaders, handleOptions, COACHING_KNOWLEDGE_ERRORS } from "./_shared.mjs";
 
 const REPORT_SYSTEM_PROMPT = `你是一位经验丰富的专业抱石教练。基于用户的攀爬训练数据（含 AI 逐帧分析结果），生成一份具体、到位的训练评估报告。
+
+${COACHING_KNOWLEDGE_ERRORS}
 
 要求：
 - **所有输出必须使用纯中文**（仅 JSON 字段名保留英文）
