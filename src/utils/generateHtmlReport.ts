@@ -35,6 +35,17 @@ export function generateHtmlReport(
             <span>${statusMap[entry.result.climb_status] || entry.result.climb_status}</span>
           </div>
           ${entry.result.instruction ? `<div class="snapshot-ins">${escapeHtml(entry.result.instruction)}</div>` : ''}
+          <div class="snapshot-markers">${(() => {
+            const errs = entry.result.markers.filter(m => m.type === 'error').length;
+            const warns = entry.result.markers.filter(m => m.type === 'warning').length;
+            const succs = entry.result.markers.filter(m => m.type === 'success').length;
+            const parts = [];
+            if (errs) parts.push(`<span class="mk-err">❌${errs}</span>`);
+            if (warns) parts.push(`<span class="mk-warn">⚠️${warns}</span>`);
+            if (succs) parts.push(`<span class="mk-succ">✅${succs}</span>`);
+            return parts.join(' ') || '<span class="mk-none">无标记</span>';
+          })()}</div>
+          ${entry.result.detailed_feedback ? `<div class="snapshot-fb">${escapeHtml(entry.result.detailed_feedback)}</div>` : ''}
         </div>
       `;
     })
@@ -144,7 +155,13 @@ body {
   background: #0f172a;
 }
 .snapshot-num { color: #ea580c; font-weight: 700; }
-.snapshot-ins {
+.snapshot-markers { padding: 2px 10px; font-size: 10px; }
+.snapshot-markers span { margin-right: 4px; }
+.mk-err { color: #ef4444; }
+.mk-warn { color: #f97316; }
+.mk-succ { color: #10b981; }
+.mk-none { color: #64748b; }
+.snapshot-fb {
   padding: 6px 10px 10px; font-size: 12px; color: #94a3b8; line-height: 1.4;
 }
 .footer {

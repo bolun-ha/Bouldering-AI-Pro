@@ -268,14 +268,23 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, onR
                           <span className="text-[9px] font-mono text-orange-400 uppercase tracking-wider">
                             #{(idx + 1).toString().padStart(2, '0')} · {Math.floor(idx * 1.8)}s
                           </span>
-                          <span className="text-[10px] text-slate-400 mt-0.5 line-clamp-1">
-                            {entry.result.detected_route_color && `线路: ${entry.result.detected_route_color}`}
-                            {entry.result.detected_route_color && ' · '}
-                            {entry.result.climb_status === 'moving' ? '移动中' :
-                             entry.result.climb_status === 'steady' ? '稳定' :
-                             entry.result.climb_status === 'stuck' ? '停滞' :
-                             entry.result.climb_status === 'falling' ? '坠落' : '完成'}
+                          <span className="text-[9px] text-slate-500 mt-0.5">
+                            {(() => {
+                              const errors = entry.result.markers.filter(m => m.type === 'error').length;
+                              const warnings = entry.result.markers.filter(m => m.type === 'warning').length;
+                              const successes = entry.result.markers.filter(m => m.type === 'success').length;
+                              const parts: string[] = [];
+                              if (errors) parts.push(`❌${errors}`);
+                              if (warnings) parts.push(`⚠️${warnings}`);
+                              if (successes) parts.push(`✅${successes}`);
+                              return parts.join(' ') || '无标记';
+                            })()}
                           </span>
+                          {entry.result.detailed_feedback && (
+                            <span className="text-[10px] text-slate-300 mt-0.5 line-clamp-2 leading-relaxed">
+                              {entry.result.detailed_feedback}
+                            </span>
+                          )}
                           <button
                             onClick={() => entry.snapshot && downloadSnapshot(entry.snapshot, idx)}
                             className="mt-1 text-[9px] text-slate-300 underline underline-offset-2 hover:text-white transition-colors flex items-center gap-1"
