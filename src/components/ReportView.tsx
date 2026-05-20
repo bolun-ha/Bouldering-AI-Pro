@@ -40,6 +40,11 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, onR
           detailed_feedback: entry.result.detailed_feedback,
           climb_status: entry.result.climb_status,
           detected_route_color: entry.result.detected_route_color,
+          markers: entry.result.markers.map(m => ({
+            type: m.type,
+            label: m.label,
+            description: m.description,
+          })),
         }));
 
         const response = await fetch('/api/report', {

@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { Upload, Play, Square, FileVideo, Radio, Activity } from 'lucide-react';
 import { AnalysisResult, SessionData, HistoryEntry, ReportData } from '../types';
 import { ReportView } from './ReportView';
+import { drawMarkers } from '../utils/drawMarkers';
 
 /**
  * 本地像素对比 — 检测视频帧是否发生明显变化
@@ -101,6 +102,11 @@ export function VideoAnalysis() {
               detailed_feedback: h.result.detailed_feedback,
               instruction: h.result.instruction,
               detected_route_color: h.result.detected_route_color,
+              markers: h.result.markers.map(m => ({
+                type: m.type,
+                label: m.label,
+                description: m.description,
+              })),
             })),
             totalErrors: session.totalErrors,
             duration: dur,
@@ -227,7 +233,7 @@ export function VideoAnalysis() {
         lastApiCallRef.current = Date.now();
         const result: AnalysisResult = await response.json();
 
-        // 缩略图快照
+        // 缩略图快照（带 AI 标注）
         let snapshot: string | undefined;
         try {
           const thumbCanvas = document.createElement('canvas');
@@ -237,7 +243,10 @@ export function VideoAnalysis() {
             thumbCanvas.height = Math.round(320 * aspect);
             const thumbCtx = thumbCanvas.getContext('2d');
             if (thumbCtx) {
+              // 先画视频帧
               thumbCtx.drawImage(video, 0, 0, thumbCanvas.width, thumbCanvas.height);
+              // 再画 AI 标注
+              drawMarkers(thumbCtx, thumbCanvas.width, thumbCanvas.height, result.markers, result.detected_route_color);
               snapshot = thumbCanvas.toDataURL('image/jpeg', 0.35);
             }
           }

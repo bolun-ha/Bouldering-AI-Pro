@@ -8,6 +8,7 @@ import { VideoRecorder } from './components/VideoRecorder';
 import { VideoAnalysis } from './components/VideoAnalysis';
 import { AnalysisResult, SessionData, HistoryEntry } from './types';
 import { Play, Square, ShieldCheck, Settings, History, Video, Camera } from 'lucide-react';
+import { drawMarkers } from './utils/drawMarkers';
 
 export default function App() {
   const [isRecording, setIsRecording] = useState(false);
@@ -82,7 +83,7 @@ export default function App() {
       const result: AnalysisResult = await response.json();
       setCurrentResult(result);
 
-      // 保存缩略图（320px 宽，用于报告中的快照画廊）
+      // 保存缩略图（320px 宽，带 AI 标注，用于报告中的快照画廊）
       let snapshot: string | undefined;
       try {
         const thumbCanvas = document.createElement('canvas');
@@ -94,6 +95,8 @@ export default function App() {
           const thumbCtx = thumbCanvas.getContext('2d');
           if (thumbCtx) {
             thumbCtx.drawImage(video, 0, 0, thumbCanvas.width, thumbCanvas.height);
+            // 画 AI 标注
+            drawMarkers(thumbCtx, thumbCanvas.width, thumbCanvas.height, result.markers, result.detected_route_color);
             snapshot = thumbCanvas.toDataURL('image/jpeg', 0.35);
           }
         }
