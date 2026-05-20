@@ -124,10 +124,14 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
                     content: [{ type: 'input_text', text }],
                   },
                 }));
-                // Trigger response
+                // Trigger response with audio output
                 ws.send(JSON.stringify({
                   event_id: nextEventId(),
                   type: 'response.create',
+                  response: {
+                    modalities: ['text', 'audio'],
+                    output_audio_format: 'mp3',
+                  },
                 }));
                 break;
 

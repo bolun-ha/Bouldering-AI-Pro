@@ -34,7 +34,7 @@ export async function zhipuChat(model, messages, systemInstruction) {
     body.messages = [{ role: "system", content: systemInstruction }, ...messages];
   }
 
-  // 429 重试：最多 3 次，指数退避
+  // 429 重试：最多 3 次，指数退避（Netlify 函数 10s 超时，总等待不能超 7s）
   const maxRetries = 3;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const res = await fetch(`${ZHIPU_BASE}/chat/completions`, {
@@ -48,7 +48,7 @@ export async function zhipuChat(model, messages, systemInstruction) {
 
     // 429 = 限流 → 等待后重试
     if (res.status === 429) {
-      const waitMs = Math.min(2000 * Math.pow(2, attempt - 1), 8000);
+      const waitMs = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
       console.warn(`Zhipu 429 rate limited (attempt ${attempt}/${maxRetries}), waiting ${waitMs}ms`);
       await new Promise(r => setTimeout(r, waitMs));
       continue;
