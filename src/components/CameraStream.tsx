@@ -1,25 +1,37 @@
 /**
- * CameraStream — 摄像头画面 + MediaPipe 骨骼追踪
+ * CameraStream — 摄像头画面 + MediaPipe 骨骼+手势追踪
  *
  * 职责：
  * 1. 打开摄像头
- * 2. 按间隔截帧（200ms）传给 AI 分析
- * 3. 运行 MediaPipe Pose 骨骼检测（~15fps）
+ * 2. 按间隔截帧（~2s）传给 AI 分析（含骨骼+手势数据）
+ * 3. 运行 MediaPipe Pose(~15fps) + Hands(~10fps)
  * 4. 规则引擎实时输出姿态标记
  */
 import React, { useRef, useEffect, useCallback } from 'react';
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
-import { initPoseEngine, detectPose, landmarksToSnapshot } from '../utils/poseEngine';
+import {
+  initAllEngines,
+  detectPose,
+  detectHands,
+  landmarksToSnapshot,
+  handLandmarksToSnapshot,
+} from '../utils/poseEngine';
 import { analyzePose } from '../utils/poseRules';
-import type { Marker } from '../types';
+import type { Marker, HandResult } from '../types';
+
+// 临时 HandResult 类型，避免跨文件依赖
+interface HandRes {
+  landmarks: NormalizedLandmark[];
+  handedness: 'Left' | 'Right';
+  score: number;
+}
 
 interface CameraStreamProps {
-  /** 截帧回调（给 AI 分析的帧） */
-  onFrame: (canvas: HTMLCanvasElement, landmarksSnapshot: string) => void;
+  onFrame: (canvas: HTMLCanvasElement, poseSnapshot: string, handSnapshot: string) => void;
   /** 实时姿态标记回调（MediaPipe 规则引擎输出） */
-  onPoseMarkers?: (markers: Marker[], landmarks: NormalizedLandmark[]) => void;
+  onPoseMarkers?: (markers: Marker[], landmarks: NormalizedLandmark[], hands?: HandRes[]) => void;
   isRecording: boolean;
-  captureInterval?: number; // ms
+  captureInterval?: number;
   onError?: (error: string) => void;
   onVideoReady?: (video: HTMLVideoElement) => void;
 }
@@ -35,6 +47,7 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const poseLandmarksRef = useRef<NormalizedLandmark[]>([]);
+  const handResultsRef = useRef<HandRes[]>([]);
   const poseActiveRef = useRef(false);
 
   // ─── 摄像头初始化 ──────────────────────────────────────────
@@ -48,12 +61,10 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
             : '摄像头需要 HTTPS 安全环境才能访问。当前页面为 HTTP。请使用 localhost 访问，或用 HTTPS 部署。';
           throw new Error(msg);
         }
-
         const constraints = {
           video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
           audio: false,
         };
-
         let stream;
         try {
           stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -61,7 +72,6 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           console.warn('Retrying with simpler constraints...');
           stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         }
-
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.onloadedmetadata = () => {
@@ -89,15 +99,17 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
     setupCamera();
   }, [onError, onVideoReady]);
 
-  // ─── MediaPipe 初始化 + 姿态检测循环 ──────────────────────
+  // ─── MediaPipe Pose + Hands 检测循环 ──────────────────────
   useEffect(() => {
     let rafId = 0;
     let lastPoseTime = 0;
-    const poseInterval = 66; // ~15fps
+    let lastHandTime = 0;
+    const poseInterval = 66;  // ~15fps
+    const handInterval = 100; // ~10fps（比 pose 低频，省电）
 
-    async function startPose() {
+    async function startDetection() {
       try {
-        await initPoseEngine();
+        await initAllEngines();
         poseActiveRef.current = true;
 
         const tick = (timestamp: number) => {
@@ -107,18 +119,28 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           const video = videoRef.current;
           if (!video || video.readyState < 2) return;
 
-          // 按间隔检测（不每帧跑，省性能）
-          if (timestamp - lastPoseTime < poseInterval) return;
-          lastPoseTime = timestamp;
-
-          const result = detectPose(video, timestamp);
-          if (result) {
-            poseLandmarksRef.current = result.landmarks;
-            // 运行规则引擎，输出实时标记
-            if (onPoseMarkers) {
-              const ruleResult = analyzePose(result.landmarks);
-              onPoseMarkers(ruleResult.markers, result.landmarks);
+          // Pose 检测
+          if (timestamp - lastPoseTime >= poseInterval) {
+            lastPoseTime = timestamp;
+            const poseRes = detectPose(video, timestamp);
+            if (poseRes) {
+              poseLandmarksRef.current = poseRes.landmarks;
             }
+          }
+
+          // Hand 检测
+          let handsThisFrame: HandRes[] | undefined;
+          if (timestamp - lastHandTime >= handInterval) {
+            lastHandTime = timestamp;
+            const handRes = detectHands(video, timestamp);
+            handResultsRef.current = handRes as unknown as HandRes[];
+            handsThisFrame = handRes.length > 0 ? (handRes as unknown as HandRes[]) : undefined;
+          }
+
+          // 规则引擎 + 回调
+          if (onPoseMarkers && poseLandmarksRef.current.length > 0) {
+            const ruleResult = analyzePose(poseLandmarksRef.current);
+            onPoseMarkers(ruleResult.markers, poseLandmarksRef.current, handsThisFrame);
           }
         };
 
@@ -128,7 +150,7 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
       }
     }
 
-    startPose();
+    startDetection();
 
     return () => {
       poseActiveRef.current = false;
@@ -136,13 +158,12 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
     };
   }, [onPoseMarkers]);
 
-  // ─── 截帧分析（提供给 AI 的帧 + 骨骼数据）───────────────
+  // ─── 截帧分析（帧 + 骨骼 + 手势）─────────────────────────
   const captureFrame = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
 
-    // 缩放分析帧到 1280×720
     const scale = Math.min(1280 / (video.videoWidth || 1280), 720 / (video.videoHeight || 720));
     canvas.width = Math.round((video.videoWidth || 1280) * scale);
     canvas.height = Math.round((video.videoHeight || 720) * scale);
@@ -150,17 +171,17 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    // 生成骨骼坐标快照
-    let snapshot = '';
+    let poseSnapshot = '';
     if (poseLandmarksRef.current.length > 0) {
-      snapshot = landmarksToSnapshot(
-        poseLandmarksRef.current,
-        canvas.width,
-        canvas.height,
-      );
+      poseSnapshot = landmarksToSnapshot(poseLandmarksRef.current, canvas.width, canvas.height);
     }
 
-    onFrame(canvas, snapshot);
+    let handSnapshot = '';
+    if (handResultsRef.current.length > 0) {
+      handSnapshot = handLandmarksToSnapshot(handResultsRef.current as any, canvas.width, canvas.height);
+    }
+
+    onFrame(canvas, poseSnapshot, handSnapshot);
   }, [onFrame]);
 
   // ─── 录制时周期性截帧 ─────────────────────────────────────

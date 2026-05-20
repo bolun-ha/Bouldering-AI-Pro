@@ -91,7 +91,8 @@ JSON 字段名本身（markers、type、label 等）保留英文，这是格式�
 - instruction: string（必须提供，纯中文，简短直接的行动指令）
 - detected_route_color: string（纯中文，识别出的线路颜色）
 - detailed_feedback: string（纯中文，**150字以内**，具体的姿态反馈和动作纠正分析，用于事后报告）
-- climb_status: 'moving' | 'steady' | 'stuck' | 'falling' | 'finished'`;
+- climb_status: 'moving' | 'steady' | 'stuck' | 'falling' | 'finished'
+- hold_positions（可选）: { x: number (0-100 百分比), y: number (0-100 百分比), color: string（纯中文，如"红色"）, type: string（纯中文，岩点类型如"大把手""深扣""小点""脚点"）, used: boolean（攀爬者是否使用了此岩点） } 数组，列出图片中可见的路线上所有岩点`;
 
 // ─── Helper: call Zhipu chat API ────────────────────────────────
 async function zhipuChat(
@@ -153,7 +154,7 @@ function extractJSON(text: string): any {
 // ─── POST /api/analyze — Frame analysis (vision) ────────────────
 app.post("/api/analyze", async (req, res) => {
   try {
-    const { image, pose } = req.body;
+    const { image, pose, hands } = req.body;
     if (!image) return res.status(400).json({ error: "Missing image data" });
 
     // Ensure the image is a full data-url
@@ -162,8 +163,11 @@ app.post("/api/analyze", async (req, res) => {
       : `data:image/jpeg;base64,${image}`;
 
     let analysisPrompt = "根据指令分析这张攀爬图片。";
-    if (pose) {
-      analysisPrompt = `图片附带的实时骨骼坐标（像素位置）：${pose}\n\n根据以上坐标和图片共同分析这张攀爬姿态。`;
+    const extra = [];
+    if (pose) extra.push(`身体骨骼坐标（像素位置）：${pose}`);
+    if (hands) extra.push(`手部数据：${hands}`);
+    if (extra.length > 0) {
+      analysisPrompt = `图片附带的实时数据——\n${extra.join('\n')}\n\n根据以上数据和图片，共同分析这张攀爬姿态。请同时输出 hold_positions 字段，列出图片中可见岩点的坐标和颜色。`;
     }
 
     const text = await zhipuChat(

@@ -27,6 +27,8 @@ export default function App() {
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
   // 当前 markers（传给 VideoRecorder 画到合成画布上）
   const markersRef = useRef<{ markers: import('./types').Marker[] }>({ markers: [] });
+  // 实时手部数据（供 hold 距离分析用）
+  const handResultsRef = useRef<any[]>([]);
 
   // 保持 markers 最新
   markersRef.current = { markers: currentResult?.markers || [] };
@@ -63,7 +65,7 @@ export default function App() {
     }
   };
 
-  const handleFrame = useCallback(async (canvas: HTMLCanvasElement, landmarksSnapshot: string = '') => {
+  const handleFrame = useCallback(async (canvas: HTMLCanvasElement, landmarksSnapshot: string = '', handSnapshot: string = '') => {
     if (!isRecording || isAnalyzing || cooldownRef.current) return;
 
     try {
@@ -72,9 +74,8 @@ export default function App() {
       const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
 
       const body: any = { image: dataUrl };
-      if (landmarksSnapshot) {
-        body.pose = landmarksSnapshot;
-      }
+      if (landmarksSnapshot) body.pose = landmarksSnapshot;
+      if (handSnapshot) body.hands = handSnapshot;
 
       const response = await fetch('/api/analyze', {
         method: 'POST',
@@ -89,6 +90,52 @@ export default function App() {
 
       const result: AnalysisResult = await response.json();
       setCurrentResult(result);
+
+      // ── 岩点-手部距离分析 ───────────────────────────────
+      if (result.hold_positions && result.hold_positions.length > 0 && handResultsRef.current.length > 0) {
+        try {
+          const { computeHoldDistances } = await import('./utils/poseEngine');
+          const video = videoElementRef.current;
+          if (video) {
+            const distances = computeHoldDistances(
+              handResultsRef.current as any,
+              result.hold_positions,
+              video.videoWidth || 1280,
+              video.videoHeight || 720,
+            );
+            // 添加未抓到岩点的标记
+            const holdMarkers: import('./types').Marker[] = [];
+            for (const d of distances) {
+              if (!d.isOnHold && d.nearestHoldIdx >= 0) {
+                const hold = result.hold_positions[d.nearestHoldIdx];
+                holdMarkers.push({
+                  x: d.handPos.x,
+                  y: d.handPos.y,
+                  type: 'warning',
+                  label: `${d.hand === 'left' ? '左' : '右'}手未握住岩点`,
+                  description: `${d.hand === 'left' ? '左' : '右'}手离最近${hold.color}岩点${d.distance.toFixed(0)}%，${d.grip.type}抓握。建议调整手位对准目标岩点。`,
+                });
+              }
+              // 抓握类型建议
+              if (d.isOnHold && d.grip.type === 'unknown') {
+                holdMarkers.push({
+                  x: d.handPos.x,
+                  y: d.handPos.y,
+                  type: 'info',
+                  label: `${d.hand === 'left' ? '左' : '右'}手抓握异常`,
+                  description: '未识别到标准抓握姿势，注意手指是否完全接触岩点。',
+                });
+              }
+            }
+            if (holdMarkers.length > 0) {
+              setCurrentResult(prev => {
+                if (!prev) return prev;
+                return { ...prev, markers: [...prev.markers, ...holdMarkers] };
+              });
+            }
+          }
+        } catch (_) { /* hold 距离分析失败不影响主流程 */ }
+      }
 
       // 保存缩略图（320px 宽，带 AI 标注，用于报告中的快照画廊）
       let snapshot: string | undefined;
@@ -133,11 +180,14 @@ export default function App() {
   }, [isRecording, isAnalyzing]);
 
   // MediaPipe 实时姿态标记
-  const handlePoseMarkers = useCallback((markers: import('./types').Marker[], _landmarks: any) => {
+  const handlePoseMarkers = useCallback((markers: import('./types').Marker[], _landmarks: any, hands?: any[]) => {
+    // 保存手部数据
+    if (hands && hands.length > 0) {
+      handResultsRef.current = hands;
+    }
     if (markers.length === 0) return;
     setCurrentResult(prev => {
       if (!prev) {
-        // 无 AI 结果时，创建临时结果仅用于展示标记
         return {
           markers,
           instruction: '',
@@ -146,7 +196,6 @@ export default function App() {
           climb_status: 'moving',
         };
       }
-      // 合并：MediaPipe 规则标记（error/warning）+ AI 标记（success/info）
       const ruleMarkers = markers.filter(m => m.type === 'error' || m.type === 'warning');
       const aiMarkers = prev.markers.filter(m => m.type === 'success' || m.type === 'info');
       const combined = [...ruleMarkers, ...aiMarkers];

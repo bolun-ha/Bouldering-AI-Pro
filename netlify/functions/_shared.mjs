@@ -70,7 +70,8 @@ JSON 字段名本身（markers、type、label 等）保留英文，这是格式�
 - instruction: string（必须提供，纯中文，简短直接的行动指令）
 - detected_route_color: string（纯中文，识别出的线路颜色）
 - detailed_feedback: string（纯中文，**150字以内**，具体的姿态反馈和动作纠正分析，用于事后报告）
-- climb_status: 'moving' | 'steady' | 'stuck' | 'falling' | 'finished'`;
+- climb_status: 'moving' | 'steady' | 'stuck' | 'falling' | 'finished'
+- hold_positions（可选）: { x: number (0-100 百分比), y: number (0-100 百分比), color: string（纯中文，如"红色"）, type: string（纯中文，岩点类型如"大把手""深扣""小点""脚点"）, used: boolean（攀爬者是否使用了此岩点） } 数组，列出图片中可见的路线上所有岩点`;
 
 // ─── 抱石教练专业知识库 ─────────────────────────────────────────
 export const COACHING_KNOWLEDGE_ERRORS = `## 常见错误模式与纠正方法
