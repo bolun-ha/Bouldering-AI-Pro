@@ -73,9 +73,9 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
       // 2. Open WebSocket with JWT as query parameter (browser WS can't set custom headers)
       const ws = new WebSocket(`${WS_URL}?Authorization=${token}`);
 
-      // 3. Handle WebSocket events
-      const result = await new Promise<void>((resolve, reject) => {
-        const chunks: ArrayBuffer[] = [];
+      // 3. Handle WebSocket events — collect audio audioChunks
+      const audioChunks: ArrayBuffer[] = [];
+      await new Promise<void>((resolve, reject) => {
         let wsClosed = false;
 
         const timeout = setTimeout(() => {
@@ -134,7 +134,7 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
               case 'response.audio.delta':
                 // Collect audio chunk (base64 MP3)
                 if (msg.delta) {
-                  chunks.push(base64ToArrayBuffer(msg.delta));
+                  audioChunks.push(base64ToArrayBuffer(msg.delta));
                 }
                 break;
 
@@ -177,17 +177,17 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
       });
 
       // 4. Play collected audio
-      if (chunks.length === 0) {
-        console.warn('No audio chunks received, using browser TTS fallback');
+      if (audioChunks.length === 0) {
+        console.warn('No audio audioChunks received, using browser TTS fallback');
         speakBrowserFallback(text);
         return;
       }
 
-      // Concatenate all MP3 chunks into one blob
-      const totalLen = chunks.reduce((sum, c) => sum + c.byteLength, 0);
+      // Concatenate all MP3 audioChunks into one blob
+      const totalLen = audioChunks.reduce((sum, c) => sum + c.byteLength, 0);
       const fullBuffer = new Uint8Array(totalLen);
       let offset = 0;
-      for (const chunk of chunks) {
+      for (const chunk of audioChunks) {
         fullBuffer.set(new Uint8Array(chunk), offset);
         offset += chunk.byteLength;
       }

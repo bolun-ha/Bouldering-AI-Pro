@@ -107,7 +107,7 @@ app.post("/api/analyze", async (req, res) => {
       : `data:image/jpeg;base64,${image}`;
 
     const text = await zhipuChat(
-      "glm-4.6v-flash", // ✅ 正确的模型名
+      "glm-5v-turbo", // 视觉模型
       [
         {
           role: "user",
