@@ -1,0 +1,19 @@
+[build]
+  command = "vite build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# API 请求转发到 Netlify Function
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+# SPA 路由回退
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
