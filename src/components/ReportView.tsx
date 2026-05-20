@@ -6,6 +6,7 @@ import {
   ChevronRight, Share2, Play, Download, Camera, Video, Pause, Sparkles, TrendingUp, Lightbulb, ListChecks, FileText
 } from 'lucide-react';
 import { generateHtmlReport } from '../utils/generateHtmlReport';
+import { smartFilterSnapshots } from '../utils/smartFilterSnapshots';
 
 interface ReportViewProps {
   data: SessionData;
@@ -237,7 +238,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, onR
                     AI 分析关键帧
                   </h3>
                   <span className="text-[10px] font-mono text-slate-500">
-                    {data.history.length} 帧
+                    {smartFilterSnapshots(data.history).length}/{data.history.length} 帧
                   </span>
                 </div>
 
@@ -247,21 +248,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, onR
                   </p>
                 ) : (
                   <div className="grid grid-cols-2 gap-3">
-                    {(() => {
-                      // 按问题集中度排序：错误多的在前
-                      const sorted = [...data.history].sort((a, b) => {
-                        const aErr = a.result.markers.filter(m => m.type === 'error').length;
-                        const bErr = b.result.markers.filter(m => m.type === 'error').length;
-                        if (aErr !== bErr) return bErr - aErr;
-                        const aWarn = a.result.markers.filter(m => m.type === 'warning').length;
-                        const bWarn = b.result.markers.filter(m => m.type === 'warning').length;
-                        if (aWarn !== bWarn) return bWarn - aWarn;
-                        return 0;
-                      });
-                      return sorted.map((entry, idx) => {
-                        // 找出原始索引（用于显示帧号）
-                        const origIdx = data.history.indexOf(entry);
-                        return (
+                    {smartFilterSnapshots(data.history).map(({ entry, origIdx }) => (
                       <div
                         key={origIdx}
                         className="relative group rounded-2xl overflow-hidden bg-slate-900"
@@ -315,9 +302,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, onR
                           </button>
                         </div>
                       </div>
-                    );
-                  });
-                })()}
+                    ))}
                   </div>
                 )}
               </div>

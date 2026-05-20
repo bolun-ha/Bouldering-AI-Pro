@@ -1,5 +1,6 @@
 /** 生成自包含的 HTML 训练报告 */
 import type { SessionData, ReportData } from '../types';
+import { smartFilterSnapshots } from './smartFilterSnapshots';
 
 export function generateHtmlReport(
   session: SessionData,
@@ -14,22 +15,14 @@ export function generateHtmlReport(
   const score = report?.overallScore ?? 0;
   const scoreColor = score >= 70 ? '#10b981' : score >= 50 ? '#f97316' : '#ef4444';
 
-  // 按问题集中度排序：错误多的在前，同错误按警告数排，问题帧优先于无问题帧
-  const sortedHistory = [...session.history].sort((a, b) => {
-    const aErr = a.result.markers.filter(m => m.type === 'error').length;
-    const bErr = b.result.markers.filter(m => m.type === 'error').length;
-    if (aErr !== bErr) return bErr - aErr;
-    const aWarn = a.result.markers.filter(m => m.type === 'warning').length;
-    const bWarn = b.result.markers.filter(m => m.type === 'warning').length;
-    if (aWarn !== bWarn) return bWarn - aWarn;
-    return 0;
-  });
+  // 智能筛选关键帧
+  const filtered = smartFilterSnapshots(session.history);
 
-  // 构建关键帧 HTML（按问题排序）
-  const snapshotsHtml = sortedHistory
-    .map((entry, i) => {
+  // 构建关键帧 HTML
+  const snapshotsHtml = filtered
+    .map(({ entry, origIdx }) => {
       if (!entry.snapshot) return '';
-      const timeEstimate = Math.floor(i * 1.8);
+      const timeEstimate = Math.floor(origIdx * 1.8);
       const statusMap: Record<string, string> = {
         moving: '移动中',
         steady: '姿势稳定',
@@ -41,7 +34,7 @@ export function generateHtmlReport(
         <div class="snapshot-card">
           <img src="${entry.snapshot}" alt="关键帧 ${i + 1}" loading="lazy" />
           <div class="snapshot-meta">
-            <span class="snapshot-num">#${(i + 1).toString().padStart(2, '0')}</span>
+            <span class="snapshot-num">#${(origIdx + 1).toString().padStart(2, '0')}</span>
             <span>${timeEstimate}s</span>
             <span>${statusMap[entry.result.climb_status] || entry.result.climb_status}</span>
           </div>
@@ -208,8 +201,8 @@ body {
     <div class="stat-label">错误/建议</div>
   </div>
   <div class="stat-card">
-    <div class="stat-value">${session.history.length}</div>
-    <div class="stat-label">分析帧数</div>
+    <div class="stat-value">${filtered.length}/${session.history.length}</div>
+    <div class="stat-label">关键帧（筛选/总计）</div>
   </div>
 </div>
 
