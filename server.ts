@@ -12,7 +12,7 @@ const PORT = 3001;
 app.use(express.json({ limit: "10mb" }));
 
 // ─── Zhipu AI Configuration ─────────────────────────────────────
-const ZHIPU_API_KEY = process.env.ZHIPU_API_KEY || "";
+const ZHIPU_API_KEY = "131e668c102648f483a65408ea3a60c5.X8wsvYZ6kck7dPUg";
 const ZHIPU_BASE = "https://open.bigmodel.cn/api/paas/v4";
 
 function zhipuHeaders() {
@@ -228,7 +228,7 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`Zhipu AI key: ${ZHIPU_API_KEY ? "✓ configured" : "✗ MISSING"}`);
+    console.log("Zhipu AI key: ✓ hardcoded");
   });
 }
 
