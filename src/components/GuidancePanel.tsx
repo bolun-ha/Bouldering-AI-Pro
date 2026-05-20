@@ -3,6 +3,25 @@ import { motion, AnimatePresence } from 'motion/react';
 import { AnalysisResult } from '../types';
 import { Volume2 } from 'lucide-react';
 
+const WS_URL = 'wss://open.bigmodel.cn/api/paas/v4/realtime';
+
+/**
+ * Decode base64 string to ArrayBuffer
+ */
+function base64ToArrayBuffer(b64: string): ArrayBuffer {
+  const binary = atob(b64);
+  const buf = new ArrayBuffer(binary.length);
+  const view = new Uint8Array(buf);
+  for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i);
+  return buf;
+}
+
+/** Simple unique event ID */
+let eventCounter = 0;
+function nextEventId(): string {
+  return `evt_${Date.now()}_${++eventCounter}`;
+}
+
 interface GuidancePanelProps {
   result: AnalysisResult | null;
   isAnalyzing: boolean;
@@ -26,33 +45,154 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
     if (result?.instruction && result.instruction !== lastInstructionRef.current) {
       console.log("AI Instruction Received:", result.instruction);
       lastInstructionRef.current = result.instruction;
-      speakWithGLM(result.instruction);
+      speakWithRealtime(result.instruction);
     }
   }, [result?.instruction]);
 
-  /** Use server-side GLM-4-Voice TTS, fallback to browser SpeechSynthesis */
-  const speakWithGLM = async (text: string) => {
+  /**
+   * Speak via GLM-Realtime-Flash (WebSocket + JWT auth)
+   * Fallback: browser SpeechSynthesis
+   */
+  const speakWithRealtime = async (text: string) => {
     if (!text) return;
 
-    try {
-      // Cancel any ongoing audio
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
+    // Cancel any ongoing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
 
-      const response = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+    try {
+      // 1. Get JWT from server
+      const jwtRes = await fetch('/api/jwt', { cache: 'no-store' });
+      if (!jwtRes.ok) throw new Error(`JWT fetch error: ${jwtRes.status}`);
+      const { token } = await jwtRes.json();
+      if (!token) throw new Error('No JWT token returned');
+
+      // 2. Open WebSocket with JWT as query parameter (browser WS can't set custom headers)
+      const ws = new WebSocket(`${WS_URL}?Authorization=${token}`);
+
+      // 3. Handle WebSocket events
+      const result = await new Promise<void>((resolve, reject) => {
+        const chunks: ArrayBuffer[] = [];
+        let wsClosed = false;
+
+        const timeout = setTimeout(() => {
+          if (!wsClosed) {
+            ws.close();
+            reject(new Error('Realtime TTS timeout'));
+          }
+        }, 15000); // 15s timeout
+
+        ws.onopen = () => {
+          console.log('Realtime WS connected');
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            // console.log('WS msg:', msg.type);
+
+            switch (msg.type) {
+              case 'session.created':
+                // Send session config
+                ws.send(JSON.stringify({
+                  event_id: nextEventId(),
+                  type: 'session.update',
+                  session: {
+                    model: 'glm-realtime-flash',
+                    modalities: ['text', 'audio'],
+                    instructions: '你是一个抱石教练语音助手。用户发送指令文本，你只需用自然口语简短读出，不做解释或回应。控制在20字以内。',
+                    voice: 'tongtong',
+                    input_audio_format: 'wav',
+                    output_audio_format: 'mp3',
+                    turn_detection: { type: 'client_vad' },
+                    beta_fields: { chat_mode: 'audio', tts_source: 'e2e' },
+                  },
+                }));
+                break;
+
+              case 'session.updated':
+                // Session ready — send text instruction
+                ws.send(JSON.stringify({
+                  event_id: nextEventId(),
+                  type: 'conversation.item.create',
+                  item: {
+                    type: 'message',
+                    role: 'user',
+                    content: [{ type: 'input_text', text }],
+                  },
+                }));
+                // Trigger response
+                ws.send(JSON.stringify({
+                  event_id: nextEventId(),
+                  type: 'response.create',
+                }));
+                break;
+
+              case 'response.audio.delta':
+                // Collect audio chunk (base64 MP3)
+                if (msg.delta) {
+                  chunks.push(base64ToArrayBuffer(msg.delta));
+                }
+                break;
+
+              case 'response.done':
+                clearTimeout(timeout);
+                if (!wsClosed) {
+                  wsClosed = true;
+                  ws.close();
+                }
+                resolve();
+                break;
+
+              case 'error':
+                clearTimeout(timeout);
+                if (!wsClosed) {
+                  wsClosed = true;
+                  ws.close();
+                }
+                reject(new Error(msg.error?.message || 'Realtime API error'));
+                break;
+            }
+          } catch (e) {
+            console.warn('WS message parse error:', e);
+          }
+        };
+
+        ws.onerror = (err) => {
+          clearTimeout(timeout);
+          console.warn('WS error:', err);
+          if (!wsClosed) {
+            wsClosed = true;
+            ws.close();
+          }
+          reject(new Error('WebSocket connection failed'));
+        };
+
+        ws.onclose = () => {
+          wsClosed = true;
+        };
       });
 
-      if (!response.ok) throw new Error(`TTS server error: ${response.status}`);
+      // 4. Play collected audio
+      if (chunks.length === 0) {
+        console.warn('No audio chunks received, using browser TTS fallback');
+        speakBrowserFallback(text);
+        return;
+      }
 
-      // Server returns audio/mpeg binary
-      const blob = await response.blob();
+      // Concatenate all MP3 chunks into one blob
+      const totalLen = chunks.reduce((sum, c) => sum + c.byteLength, 0);
+      const fullBuffer = new Uint8Array(totalLen);
+      let offset = 0;
+      for (const chunk of chunks) {
+        fullBuffer.set(new Uint8Array(chunk), offset);
+        offset += chunk.byteLength;
+      }
+
+      const blob = new Blob([fullBuffer], { type: 'audio/mp3' });
       const url = URL.createObjectURL(blob);
-
       const audio = new Audio(url);
       audioRef.current = audio;
 
@@ -62,7 +202,7 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
       };
 
       audio.onerror = () => {
-        console.warn('Audio playback failed, falling back to browser TTS');
+        console.warn('MP3 playback failed, trying browser TTS fallback');
         URL.revokeObjectURL(url);
         if (audioRef.current === audio) audioRef.current = null;
         speakBrowserFallback(text);
@@ -70,7 +210,7 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
 
       await audio.play();
     } catch (err) {
-      console.warn('Server TTS unavailable, using browser TTS fallback:', err);
+      console.warn('Realtime TTS failed, using browser TTS fallback:', err);
       speakBrowserFallback(text);
     }
   };
@@ -116,7 +256,7 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
               {!isAnalyzing && (
                 <div className="mt-2 flex items-center justify-center gap-1 text-[8px] text-slate-500 uppercase tracking-widest">
                   <Volume2 className="w-3 h-3" />
-                  <span>GLM-4-Voice</span>
+                  <span>GLM-Realtime-Flash</span>
                 </div>
               )}
             </div>

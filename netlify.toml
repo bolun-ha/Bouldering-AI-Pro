@@ -28,6 +28,12 @@
   status = 200
   force = true
 
+[[redirects]]
+  from = "/api/jwt"
+  to = "/.netlify/functions/jwt"
+  status = 200
+  force = true
+
 # SPA 路由回退
 [[redirects]]
   from = "/*"

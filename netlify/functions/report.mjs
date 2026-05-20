@@ -3,15 +3,17 @@ import { zhipuChat, extractJSON, corsHeaders, handleOptions } from "./_shared.mj
 
 const REPORT_SYSTEM_PROMPT = `你是一位专业的抱石教练。基于用户的攀爬训练数据，生成一份专业的训练评估报告。
 
-请分析用户提供的攀爬数据，考虑以下维度：
-1. 整体表现评分（0-100）
-2. 训练摘要（客观评价整段表现）
-3. 优点（2-3 个具体方面）
-4. 需要改进的弱点（2-3 个具体方面）
-5. 针对性的训练改进建议（2-3 条）
-6. 趋势分析（如果数据点足够多）
+请严格按照以下 JSON 格式返回，不要包含任何其他文字或注释：
 
-必须严格返回 JSON 格式，不要包含任何其他文字。`;
+{"overallScore": 80, "summary": "摘要文字", "strengths": ["优点1", "优点2"], "weaknesses": ["弱点1", "弱点2"], "improvements": ["建议1", "建议2"], "trend": "趋势分析"}
+
+字段说明：
+- overallScore: 0-100 的整数
+- summary: 训练摘要，50字以内，中文
+- strengths: 优点数组，2-3项
+- weaknesses: 需要改进的弱点，2-3项
+- improvements: 改进建议，2-3条，中文
+- trend: 趋势分析，一句话，中文`;
 
 export async function handler(event) {
   if (event.httpMethod === "OPTIONS") return handleOptions();
@@ -34,9 +36,13 @@ export async function handler(event) {
 - AI 分析帧数: ${(history || []).length}
 - 逐帧分析:
 ${framesSummary || "无数据"}
-请严格按照 JSON 格式生成专业训练报告。`;
 
-    const text = await zhipuChat("glm-4-flash", [{ role: "user", content: userPrompt }], REPORT_SYSTEM_PROMPT);
+请严格按照以下 JSON 格式返回专业训练报告：
+{"overallScore": 整数0-100, "summary": "中文摘要", "strengths": ["中文优点"], "weaknesses": ["中文弱点"], "improvements": ["中文建议"], "trend": "中文趋势"}
+
+字段名必须用英文，值用中文。`;
+
+    const text = await zhipuChat("glm-4.7-flash", [{ role: "user", content: userPrompt }], REPORT_SYSTEM_PROMPT);
     return { statusCode: 200, headers: corsHeaders, body: JSON.stringify(extractJSON(text)) };
   } catch (error) {
     console.error("report Error:", error.message);
