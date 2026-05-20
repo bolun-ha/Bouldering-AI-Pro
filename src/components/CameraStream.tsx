@@ -21,6 +21,15 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
   useEffect(() => {
     async function setupCamera() {
       try {
+        // 🔥 关键检查：navigator.mediaDevices 在 HTTP 环境下不存在
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          const isHttps = window.location.protocol === 'https:';
+          const msg = isHttps
+            ? "您的浏览器不支持摄像头访问（getUserMedia 不可用），请使用现代浏览器并确保已授予摄像头权限。"
+            : "摄像头需要 HTTPS 安全环境才能访问。当前页面为 HTTP。请使用 localhost 访问，或用 HTTPS 部署。";
+          throw new Error(msg);
+        }
+
         const constraints = { 
           video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false 
@@ -46,7 +55,16 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
       } catch (err: any) {
         console.error("Camera access denied:", err);
         if (onError) {
-          onError(err.message || "无法访问摄像头。请确保已授予权限并在 HTTPS 环境下运行，或尝试在新窗口中打开。");
+          // 提取有意义的中文错误
+          let msg = err.message || String(err);
+          if (msg.includes('Permission denied') || msg.includes('NotAllowedError')) {
+            msg = "摄像头权限被拒绝。请在浏览器设置中允许摄像头访问，或检查是否有其他应用占用摄像头。";
+          } else if (msg.includes('NotFoundError')) {
+            msg = "未检测到摄像头设备，请确保摄像头已连接且在浏览器中已授权。";
+          } else if (msg.includes('NotReadableError')) {
+            msg = "摄像头被其他应用占用，请关闭其他使用摄像头的程序后重试。";
+          }
+          onError(msg);
         }
       }
     }

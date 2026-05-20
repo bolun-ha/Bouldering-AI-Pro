@@ -48,9 +48,10 @@ async function zhipuChat(
   const body: any = { model, messages };
 
   if (systemInstruction) {
-    // Zhipu uses a top-level system field or a system message
     body.messages = [{ role: "system", content: systemInstruction }, ...messages];
   }
+
+  // vision 模型不支持 response_format，所以不传 json_object
 
   const response = await fetch(`${ZHIPU_BASE}/chat/completions`, {
     method: "POST",
@@ -62,7 +63,7 @@ async function zhipuChat(
   if (!response.ok) {
     throw new Error(
       `Zhipu API error (${response.status}): ${
-        JSON.stringify(data.error || data)
+        typeof data === "object" ? JSON.stringify(data.error || data) : data
       }`
     );
   }
@@ -95,7 +96,7 @@ app.post("/api/analyze", async (req, res) => {
       : `data:image/jpeg;base64,${image}`;
 
     const text = await zhipuChat(
-      "glm-4v-flash",
+      "glm-4.6v-flash", // ✅ 正确的模型名
       [
         {
           role: "user",
@@ -153,9 +154,13 @@ ${framesSummary || "无数据"}
 
 请严格按照 JSON 格式生成专业训练报告。`;
 
-    const text = await zhipuChat("glm-4-flash", [
-      { role: "user", content: userPrompt },
-    ], REPORT_SYSTEM_PROMPT);
+    const text = await zhipuChat(
+      "glm-4-flash", // 文本模型，不需要 vision
+      [
+        { role: "user", content: userPrompt },
+      ],
+      REPORT_SYSTEM_PROMPT
+    );
 
     const result = extractJSON(text);
     console.log("Report Result:", JSON.stringify(result, null, 2));
@@ -166,21 +171,24 @@ ${framesSummary || "无数据"}
   }
 });
 
-// ─── POST /api/tts — Text-to-Speech via GLM-4-Voice ─────────────
+// ─── POST /api/tts — Text-to-Speech via GLM-TTS ────────────────
 app.post("/api/tts", async (req, res) => {
   try {
     const { text } = req.body;
     if (!text) return res.status(400).json({ error: "Missing text" });
 
-    const response = await fetch(`${ZHIPU_BASE}/sync/tts`, {
+    console.log(`TTS request: "${text}"`);
+
+    const response = await fetch(`${ZHIPU_BASE}/audio/speech`, {
       method: "POST",
       headers: zhipuHeaders(),
       body: JSON.stringify({
-        model: "GLM-4-Voice",
-        input: text,
-        voice: "zhongxing",
-        response_format: "mp3",
+        model: "glm-tts",          // ✅ GLM-TTS, 不是 GLM-4-Voice
+        input: text,                // ✅ 参数名是 input, 不是 text
+        voice: "female",           // ✅ 支持: female(彤彤), male(小陈) 等
+        response_format: "wav",     // ✅ 可选 wav / mp3 / pcm
         speed: 1.0,
+        volume: 1.0,
       }),
     });
 
@@ -189,12 +197,15 @@ app.post("/api/tts", async (req, res) => {
       throw new Error(`TTS API error (${response.status}): ${errText}`);
     }
 
+    // GLM-TTS 直接返回二进制音频数据
     const audioBuffer = await response.arrayBuffer();
-    res.set("Content-Type", "audio/mpeg");
+    console.log(`TTS response: ${audioBuffer.byteLength} bytes`);
+
+    res.set("Content-Type", "audio/wav");
     res.send(Buffer.from(audioBuffer));
   } catch (error: any) {
-    console.error("TTS Error:", error);
-    // Fallback: return a JSON error (frontend will fallback to browser TTS)
+    console.error("TTS Error:", error.message);
+    // Return JSON error so frontend falls back to browser TTS
     res.status(500).json({ error: error.message });
   }
 });
