@@ -67,7 +67,7 @@ export default function App() {
     try {
       setIsAnalyzing(true);
       setAnalysisError(null);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
 
       const response = await fetch('/api/analyze', {
         method: 'POST',

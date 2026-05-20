@@ -217,11 +217,11 @@ export function VideoAnalysis() {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      canvas.width = 960;
-      canvas.height = 540;
-      ctx.drawImage(video, 0, 0, 960, 540);
+      canvas.width = 1280;
+      canvas.height = 720;
+      ctx.drawImage(video, 0, 0, 1280, 720);
 
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
       frameCounterRef.current++;
       const frameNum = frameCounterRef.current;
 
