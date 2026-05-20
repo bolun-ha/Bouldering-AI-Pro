@@ -8,16 +8,13 @@ interface VideoRecorderProps {
   markers: Marker[];
   /** 是否正在录制 */
   active: boolean;
-  /** 录制完成回调 */
+  /** 录制完成回调（annotatedBlob = 带标注版，rawBlob = 原始无标注版） */
   onRecordingComplete: (result: {
     annotatedBlob: Blob;
-    rawBlob?: Blob;
-    mode: 'annotated' | 'both';
+    rawBlob: Blob;
   }) => void;
   /** 每秒帧数（默认 15，平衡性能与流畅度） */
   fps?: number;
-  /** 是否同时录制原始无标注版本 */
-  recordRaw?: boolean;
 }
 
 /** 标记类型对应的颜色 */
@@ -38,7 +35,6 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
   active,
   onRecordingComplete,
   fps = 15,
-  recordRaw = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -198,7 +194,7 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
       }
 
       // 原始无标注版录制（直接从 video 元素捕获）
-      if (recordRaw && video.captureStream) {
+      if (video.captureStream) {
         try {
           const rawStream = video.captureStream();
           const mimeType = getMimeType();
@@ -225,19 +221,15 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
       cancelAnimationFrame(rafRef.current);
 
       let annotatedDone = false;
-      let rawDone = !recordRaw;
+      let rawDone = false;
       rawBlobResult = undefined;
 
       const tryComplete = () => {
         if (!annotatedDone || !rawDone) return;
         isRecordingRef.current = false;
         const annotatedBlob = new Blob(chunksRef.current, { type: 'video/webm' });
-        console.log(`录制完成: 标注版 ${(annotatedBlob.size / 1024 / 1024).toFixed(1)}MB${rawBlobResult ? `, 原始版 ${(rawBlobResult.size / 1024 / 1024).toFixed(1)}MB` : ''}`);
-        onRecordingComplete({
-          annotatedBlob,
-          rawBlob: rawBlobResult,
-          mode: recordRaw ? 'both' : 'annotated',
-        });
+        console.log(`录制完成: 标注版 ${(annotatedBlob.size / 1024 / 1024).toFixed(1)}MB, 原始版 ${(rawBlobResult?.size || 0) / 1024 / 1024}MB`);
+        onRecordingComplete({ annotatedBlob, rawBlob: rawBlobResult || annotatedBlob });
       };
 
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -267,12 +259,11 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
         const annotatedBlob = new Blob(chunksRef.current, { type: 'video/webm' });
         onRecordingComplete({
           annotatedBlob,
-          rawBlob: rawBlobResult,
-          mode: recordRaw ? 'both' : 'annotated',
+          rawBlob: rawBlobResult || annotatedBlob,
         });
       }
     };
-  }, [active, video, fps, drawFrame, onRecordingComplete, recordRaw]);
+  }, [active, video, fps, drawFrame, onRecordingComplete]);
 
   return (
     <canvas

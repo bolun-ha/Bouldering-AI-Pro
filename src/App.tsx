@@ -20,7 +20,6 @@ export default function App() {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [recordedVideoBlob, setRecordedVideoBlob] = useState<Blob | null>(null);
   const [recordedRawBlob, setRecordedRawBlob] = useState<Blob | null>(null);
-  const [recordRawMode, setRecordRawMode] = useState(false);
   const [mode, setMode] = useState<'camera' | 'video'>('camera');
   const cooldownRef = useRef(false);
 
@@ -36,9 +35,9 @@ export default function App() {
     videoElementRef.current = video;
   }, []);
 
-  const handleRecordingComplete = useCallback((result: { annotatedBlob: Blob; rawBlob?: Blob; mode: 'annotated' | 'both' }) => {
+  const handleRecordingComplete = useCallback((result: { annotatedBlob: Blob; rawBlob: Blob }) => {
     setRecordedVideoBlob(result.annotatedBlob);
-    if (result.rawBlob) setRecordedRawBlob(result.rawBlob);
+    setRecordedRawBlob(result.rawBlob);
   }, []);
 
   const startClimb = () => {
@@ -160,18 +159,6 @@ export default function App() {
             >
               <Video className="w-3 h-3" /> 视频
             </button>
-            {/* 同时录制原始版切换 */}
-            <button
-              onClick={() => setRecordRawMode(v => !v)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
-                recordRawMode
-                  ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-              title="同时保存无 AI 标注的原始版本"
-            >
-              {recordRawMode ? '标注+原始' : '仅标注'}
-            </button>
           </div>
           <div className="flex flex-col items-end">
             <span className="text-[8px] text-slate-500 uppercase font-black">云端延迟</span>
@@ -201,7 +188,6 @@ export default function App() {
               active={isRecording}
               onRecordingComplete={handleRecordingComplete}
               fps={15}
-              recordRaw={recordRawMode}
             />
 
             {/* Camera Error Message */}
