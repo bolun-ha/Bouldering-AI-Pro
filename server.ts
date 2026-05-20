@@ -119,7 +119,7 @@ app.post("/api/analyze", async (req, res) => {
       : `data:image/jpeg;base64,${image}`;
 
     const text = await zhipuChat(
-      "glm-4.6v-flash", // 视觉模型
+      "glm-4v-flash", // 视觉模型
       [
         {
           role: "user",
@@ -183,7 +183,7 @@ ${framesSummary || "无数据"}
 字段名必须用英文，值用中文。`;
 
     const text = await zhipuChat(
-      "glm-4.7-flash", // 文本模型，不需要 vision
+      "glm-4-flash", // 文本模型，不需要 vision
       [
         { role: "user", content: userPrompt },
       ],

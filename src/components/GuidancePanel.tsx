@@ -87,6 +87,40 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
 
         ws.onopen = () => {
           console.log('Realtime WS connected');
+          // Session config must be sent first; server processes WS messages in order
+          ws.send(JSON.stringify({
+            event_id: nextEventId(),
+            type: 'session.update',
+            session: {
+              model: 'glm-realtime-flash',
+              modalities: ['text', 'audio'],
+              instructions: '你是一个抱石教练语音助手。用户发送指令文本，你只需用自然口语简短读出，不做解释或回应。控制在20字以内。',
+              voice: 'tongtong',
+              input_audio_format: 'wav',
+              output_audio_format: 'mp3',
+              turn_detection: null, // 纯 TTS，不需要 VAD
+              beta_fields: { chat_mode: 'audio', tts_source: 'e2e' },
+            },
+          }));
+          // Send instruction after session config
+          ws.send(JSON.stringify({
+            event_id: nextEventId(),
+            type: 'conversation.item.create',
+            item: {
+              type: 'message',
+              role: 'user',
+              content: [{ type: 'input_text', text }],
+            },
+          }));
+          // Trigger response
+          ws.send(JSON.stringify({
+            event_id: nextEventId(),
+            type: 'response.create',
+            response: {
+              modalities: ['text', 'audio'],
+              output_audio_format: 'mp3',
+            },
+          }));
         };
 
         ws.onmessage = (event) => {
@@ -96,43 +130,19 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
 
             switch (msg.type) {
               case 'session.created':
-                // Send session config
-                ws.send(JSON.stringify({
-                  event_id: nextEventId(),
-                  type: 'session.update',
-                  session: {
-                    model: 'glm-realtime-flash',
-                    modalities: ['text', 'audio'],
-                    instructions: '你是一个抱石教练语音助手。用户发送指令文本，你只需用自然口语简短读出，不做解释或回应。控制在20字以内。',
-                    voice: 'tongtong',
-                    input_audio_format: 'wav',
-                    output_audio_format: 'mp3',
-                    turn_detection: { type: 'client_vad' },
-                    beta_fields: { chat_mode: 'audio', tts_source: 'e2e' },
-                  },
-                }));
+                console.log('WS session.created');
                 break;
 
               case 'session.updated':
-                // Session ready — send text instruction
-                ws.send(JSON.stringify({
-                  event_id: nextEventId(),
-                  type: 'conversation.item.create',
-                  item: {
-                    type: 'message',
-                    role: 'user',
-                    content: [{ type: 'input_text', text }],
-                  },
-                }));
-                // Trigger response with audio output
-                ws.send(JSON.stringify({
-                  event_id: nextEventId(),
-                  type: 'response.create',
-                  response: {
-                    modalities: ['text', 'audio'],
-                    output_audio_format: 'mp3',
-                  },
-                }));
+                console.log('WS session.updated');
+                break;
+
+              case 'conversation.item.created':
+                console.log('WS item created');
+                break;
+
+              case 'response.created':
+                console.log('WS response.created');
                 break;
 
               case 'response.audio.delta':

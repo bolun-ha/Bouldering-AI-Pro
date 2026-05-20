@@ -42,7 +42,7 @@ ${framesSummary || "无数据"}
 
 字段名必须用英文，值用中文。`;
 
-    const text = await zhipuChat("glm-4.7-flash", [{ role: "user", content: userPrompt }], REPORT_SYSTEM_PROMPT);
+    const text = await zhipuChat("glm-4-flash", [{ role: "user", content: userPrompt }], REPORT_SYSTEM_PROMPT);
     return { statusCode: 200, headers: corsHeaders, body: JSON.stringify(extractJSON(text)) };
   } catch (error) {
     console.error("report Error:", error.message);

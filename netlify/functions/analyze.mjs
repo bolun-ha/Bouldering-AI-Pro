@@ -14,7 +14,7 @@ export async function handler(event) {
     const imageUrl = image.startsWith("data:") ? image : `data:image/jpeg;base64,${image}`;
 
     const text = await zhipuChat(
-      "glm-4.6v-flash",
+      "glm-4v-flash",
       [
         {
           role: "user",
