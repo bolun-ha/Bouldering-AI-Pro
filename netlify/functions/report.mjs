@@ -31,13 +31,15 @@ export async function handler(event) {
   try {
     const { history, totalErrors, duration } = JSON.parse(event.body || "{}");
 
-    // 构建包含标记数据的帧摘要
+    // 构建包含标记数据的帧摘要（所有字段转中文，不让模型看到英文值）
+    const statusMap = { moving: '移动中', steady: '稳定', stuck: '停滞', falling: '坠落', finished: '完成' };
     const framesSummary = (history || [])
       .map((h, i) => {
-        const markerLabels = (h.markers || []).map(m => `${m.type === 'error' ? '❌' : m.type === 'warning' ? '⚠️' : m.type === 'success' ? '✅' : '💡'}${m.label || ''}${m.description ? ': ' + m.description : ''}`).join('; ');
-        return `[帧${i + 1}] 状态:${h.climb_status || "未知"} 反馈:${h.detailed_feedback || "无"} 指令:${h.instruction || "无"} 线路:${h.detected_route_color || "未知"} 标记:${markerLabels || "无"}`;
+        const markerLabels = (h.markers || []).map(m => `${m.type === 'error' ? '❌' : m.type === 'warning' ? '⚠️' : m.type === 'success' ? '✅' : '💡'}${m.label || ''}${m.description ? '：' + m.description : ''}`).join('；');
+        const chineseStatus = statusMap[h.climb_status] || h.climb_status || '未知';
+        return `【第${i + 1}帧】 状态：${chineseStatus} 反馈：${h.detailed_feedback || '无'} 指令：${h.instruction || '无'} 线路：${h.detected_route_color || '未知'} 标记：${markerLabels || '无'}`;
       })
-      .join("\n");
+      .join('\n');
 
     const userPrompt = `攀爬数据报告生成：
 - 攀爬时长：${duration || 0}秒

@@ -59,6 +59,17 @@ markers 用于在图片上标注关键位置。每个标记包含：
 2. 标注位置（x, y）要指向具体的身体部位
 3. **数量严格限制在 5 个以内**
 
+### 纯中文要求
+**注意：以下所有字段的值必须使用纯中文，不允许出现英文单词：**
+- `label`：纯中文，如"膝盖内扣"，不要写"knee inward"
+- `description`：纯中文
+- `instruction`：纯中文，不超过20个字
+- `detailed_feedback`：纯中文，150字以内
+- `detected_route_color`：纯中文，如"红色""蓝色"
+- 不允许在以上字段中出现任何英文字母或英文标点
+
+JSON 字段名本身（markers, type, label 等）保留英文，这是格式要求，不违反纯中文规则。
+
 ### 线路规则
 - 首先观察攀爬者接触或踩踏的支点颜色，以此确定本次攀爬的目标颜色线路
 - success 标记必须严格限定在该颜色系列的支点上
@@ -192,17 +203,19 @@ app.post("/api/report", async (req, res) => {
     const { history, totalErrors, duration } = req.body;
 
     // Build a concise summary of the session for the AI
+    const statusMap: Record<string, string> = { moving: '移动中', steady: '稳定', stuck: '停滞', falling: '坠落', finished: '完成' };
     const framesSummary = (history || [])
       .map((h: any, i: number) => {
-        return `[帧${i + 1}] 状态:${h.climb_status || "未知"} 反馈:${h.detailed_feedback || "无"} 指令:${h.instruction || "无"} 线路:${h.detected_route_color || "未知"}`;
+        const chineseStatus = statusMap[h.climb_status] || h.climb_status || '未知';
+        return `【第${i + 1}帧】 状态：${chineseStatus} 反馈：${h.detailed_feedback || '无'} 指令：${h.instruction || '无'} 线路：${h.detected_route_color || '未知'}`;
       })
-      .join("\n");
+      .join('\n');
 
     const userPrompt = `攀爬数据报告生成：
-- 攀爬时长: ${duration || 0}秒
-- 总错误/建议数: ${totalErrors || 0}
-- AI 分析帧数: ${(history || []).length}
-- 逐帧分析:
+- 攀爬时长：${duration || 0}秒
+- 总错误/建议数：${totalErrors || 0}
+- AI 分析帧数：${(history || []).length}
+- 逐帧分析：
 ${framesSummary || "无数据"}
 
 请严格按照以下 JSON 格式返回专业训练报告：
