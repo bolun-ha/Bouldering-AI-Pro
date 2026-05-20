@@ -5,8 +5,9 @@ import { Overlay } from './components/Overlay';
 import { GuidancePanel } from './components/GuidancePanel';
 import { ReportView } from './components/ReportView';
 import { VideoRecorder } from './components/VideoRecorder';
+import { VideoAnalysis } from './components/VideoAnalysis';
 import { AnalysisResult, SessionData, HistoryEntry } from './types';
-import { Play, Square, ShieldCheck, Settings, History } from 'lucide-react';
+import { Play, Square, ShieldCheck, Settings, History, Video, Camera } from 'lucide-react';
 
 export default function App() {
   const [isRecording, setIsRecording] = useState(false);
@@ -17,6 +18,7 @@ export default function App() {
   const [session, setSession] = useState<SessionData | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [recordedVideoBlob, setRecordedVideoBlob] = useState<Blob | null>(null);
+  const [mode, setMode] = useState<'camera' | 'video'>('camera');
   const cooldownRef = useRef(false);
 
   // Video 元素引用（传给 VideoRecorder 做合成录制）
@@ -130,6 +132,29 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-4">
+          {/* Mode Toggle */}
+          <div className="flex bg-slate-900 rounded-xl p-0.5 border border-slate-800">
+            <button
+              onClick={() => setMode('camera')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                mode === 'camera'
+                  ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/20'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <Camera className="w-3 h-3" /> 实时
+            </button>
+            <button
+              onClick={() => setMode('video')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+                mode === 'video'
+                  ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/20'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <Video className="w-3 h-3" /> 视频
+            </button>
+          </div>
           <div className="flex flex-col items-end">
             <span className="text-[8px] text-slate-500 uppercase font-black">云端延迟</span>
             <span className="text-[10px] font-mono text-emerald-400">1.2s</span>
@@ -139,73 +164,79 @@ export default function App() {
         </div>
       </header>
 
-      {/* Full-Screen Camera Content */}
+      {/* Full-Screen Content */}
       <main className="flex-1 relative overflow-hidden bg-slate-900 shadow-inner">
-        <CameraStream
-          onFrame={handleFrame}
-          isRecording={isRecording}
-          captureInterval={1800}
-          onError={setCameraError}
-          onVideoReady={handleVideoReady}
-        />
+        {mode === 'camera' ? (
+          <>
+            <CameraStream
+              onFrame={handleFrame}
+              isRecording={isRecording}
+              captureInterval={1800}
+              onError={setCameraError}
+              onVideoReady={handleVideoReady}
+            />
 
-        {/* VideoRecorder（隐藏的合成录制引擎） */}
-        <VideoRecorder
-          video={videoElementRef.current}
-          markers={currentResult?.markers || []}
-          active={isRecording}
-          onRecordingComplete={handleRecordingComplete}
-          fps={15}
-        />
+            {/* VideoRecorder（隐藏的合成录制引擎） */}
+            <VideoRecorder
+              video={videoElementRef.current}
+              markers={currentResult?.markers || []}
+              active={isRecording}
+              onRecordingComplete={handleRecordingComplete}
+              fps={15}
+            />
 
-        {/* Camera Error Message */}
-        {cameraError && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center p-8 text-center bg-slate-950/90 backdrop-blur-md">
-            <div className="max-w-xs space-y-4">
-              <div className="w-16 h-16 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Square className="w-8 h-8 fill-current" />
+            {/* Camera Error Message */}
+            {cameraError && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center p-8 text-center bg-slate-950/90 backdrop-blur-md">
+                <div className="max-w-xs space-y-4">
+                  <div className="w-16 h-16 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Square className="w-8 h-8 fill-current" />
+                  </div>
+                  <h2 className="text-xl font-black uppercase italic text-white italic">访问被拒绝</h2>
+                  <p className="text-slate-400 text-sm leading-relaxed">
+                    {cameraError}
+                  </p>
+                  <div className="pt-4">
+                    <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2">解决方案</p>
+                    <button
+                      onClick={() => window.open(window.location.href, '_blank')}
+                      className="bg-orange-600 hover:bg-orange-500 text-white px-6 py-3 rounded-xl font-bold transition-all text-sm w-full"
+                    >
+                      在新窗口中打开
+                    </button>
+                  </div>
+                </div>
               </div>
-              <h2 className="text-xl font-black uppercase italic text-white italic">访问被拒绝</h2>
-              <p className="text-slate-400 text-sm leading-relaxed">
-                {cameraError}
-              </p>
-              <div className="pt-4">
-                <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2">解决方案</p>
-                <button
-                  onClick={() => window.open(window.location.href, '_blank')}
-                  className="bg-orange-600 hover:bg-orange-500 text-white px-6 py-3 rounded-xl font-bold transition-all text-sm w-full"
-                >
-                  在新窗口中打开
-                </button>
+            )}
+
+            {/* Overlays */}
+            <Overlay markers={currentResult?.markers || []} />
+            <GuidancePanel result={currentResult} isAnalyzing={isAnalyzing} error={analysisError} />
+
+            {/* 录制中提示（录制时显示录制小红点） */}
+            {isRecording && (
+              <div className="absolute top-20 left-6 z-40 flex items-center gap-2 bg-slate-950/70 backdrop-blur-md border border-red-500/30 px-3 py-1.5 rounded-full">
+                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                <span className="text-[10px] font-mono text-red-400 uppercase tracking-widest">录制中</span>
               </div>
-            </div>
-          </div>
-        )}
+            )}
 
-        {/* Overlays */}
-        <Overlay markers={currentResult?.markers || []} />
-        <GuidancePanel result={currentResult} isAnalyzing={isAnalyzing} error={analysisError} />
-
-        {/* 录制中提示（录制时显示录制小红点） */}
-        {isRecording && (
-          <div className="absolute top-20 left-6 z-40 flex items-center gap-2 bg-slate-950/70 backdrop-blur-md border border-red-500/30 px-3 py-1.5 rounded-full">
-            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-            <span className="text-[10px] font-mono text-red-400 uppercase tracking-widest">录制中</span>
-          </div>
-        )}
-
-        {/* Global Loading Indicator (Subtle) */}
-        {isAnalyzing && (
-          <div className="absolute top-20 right-6 z-40 bg-slate-950/60 backdrop-blur-md border border-white/5 px-2 py-1 rounded-md flex items-center gap-2">
-            <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce" />
-            <span className="text-[8px] font-mono text-blue-400 uppercase tracking-widest">云端分析中</span>
-          </div>
+            {/* Global Loading Indicator (Subtle) */}
+            {isAnalyzing && (
+              <div className="absolute top-20 right-6 z-40 bg-slate-950/60 backdrop-blur-md border border-white/5 px-2 py-1 rounded-md flex items-center gap-2">
+                <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce" />
+                <span className="text-[8px] font-mono text-blue-400 uppercase tracking-widest">云端分析中</span>
+              </div>
+            )}
+          </>
+        ) : (
+          <VideoAnalysis />
         )}
       </main>
 
-      {/* Floating Controls Overlay (Visible only when not recording) */}
+      {/* Camera Mode: Floating Controls Overlay (Visible only when not recording) */}
       <AnimatePresence>
-        {!isRecording && !showReport && (
+        {mode === 'camera' && !isRecording && !showReport && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -231,8 +262,8 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Recording HUD */}
-      {isRecording && (
+      {/* Camera Mode: Recording HUD */}
+      {mode === 'camera' && isRecording && (
         <div className="absolute bottom-12 right-6 z-50 flex flex-col items-end gap-4 pointer-events-none">
           {/* Status Label */}
           {currentResult?.climb_status && (
@@ -263,13 +294,15 @@ export default function App() {
 
       {/* Bottom Meter Rail */}
       <footer className="h-4 bg-slate-950 flex items-center justify-between px-6 z-40 border-t border-slate-900/50">
-          <div className="flex gap-4 text-[6px] font-mono text-slate-600 uppercase tracking-[0.2em]">
-            <span>端到端加密已启用</span>
-            <span>网络带宽: 420MB/s</span>
-            {currentResult?.detected_route_color && (
-              <span className="text-orange-500 font-bold">检测线路: {currentResult.detected_route_color}</span>
-            )}
-          </div>
+          {mode === 'camera' && (
+            <div className="flex gap-4 text-[6px] font-mono text-slate-600 uppercase tracking-[0.2em]">
+              <span>端到端加密已启用</span>
+              <span>网络带宽: 420MB/s</span>
+              {currentResult?.detected_route_color && (
+                <span className="text-orange-500 font-bold">检测线路: {currentResult.detected_route_color}</span>
+              )}
+            </div>
+          )}
         <ShieldCheck className="w-3 h-3 text-emerald-950" />
       </footer>
 
