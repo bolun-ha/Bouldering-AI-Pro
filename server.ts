@@ -235,7 +235,11 @@ const REPORT_SYSTEM_PROMPT = `你是一位专业的抱石教练。基于用户�
 
 app.post("/api/report", async (req, res) => {
   try {
-    const { history, totalErrors, duration } = req.body;
+    const { history, totalErrors, duration, difficulty } = req.body;
+
+    const difficultyContext = difficulty
+      ? `\n- 线路难度：${difficulty.grade}（类别：${difficulty.category === 'simple' ? '简单 V0-V2' : difficulty.category === 'medium' ? '中等 V3-V5' : '难 V6-V8+'}）\n注意：评分和建议要考虑难度级别。低难度线路动作要求严格，高难度线路适当宽容。`
+      : '\n- 线路难度：未指定（默认按中等 V3-V5 评估）';
 
     // Build a concise summary of the session for the AI
     const statusMap: Record<string, string> = { moving: '移动中', steady: '稳定', stuck: '停滞', falling: '坠落', finished: '完成' };
@@ -250,6 +254,7 @@ app.post("/api/report", async (req, res) => {
 - 攀爬时长：${duration || 0}秒
 - 总错误/建议数：${totalErrors || 0}
 - AI 分析帧数：${(history || []).length}
+${difficultyContext}
 - 逐帧分析：
 ${framesSummary || "无数据"}
 

@@ -31,7 +31,12 @@ export async function handler(event) {
   }
 
   try {
-    const { history, totalErrors, duration } = JSON.parse(event.body || "{}");
+    const { history, totalErrors, duration, difficulty } = JSON.parse(event.body || "{}");
+
+    // 难度上下文
+    const difficultyContext = difficulty
+      ? `\n线路难度：${difficulty.grade}（类别：${difficulty.category === 'simple' ? '简单 V0-V2' : difficulty.category === 'medium' ? '中等 V3-V5' : '难 V6-V8+'}）\n注意：评分和建议要考虑难度级别。低难度线路动作要求严格，高难度线路适当宽容（力竭导致的动作变形可接受）。`
+      : '\n线路难度：未指定（默认按中等 V3-V5 评估）';
 
     // 构建包含标记数据的帧摘要（所有字段转中文，不让模型看到英文值）
     const statusMap = { moving: '移动中', steady: '稳定', stuck: '停滞', falling: '坠落', finished: '完成' };
@@ -47,6 +52,7 @@ export async function handler(event) {
 - 攀爬时长：${duration || 0}秒
 - 错误/建议总数：${totalErrors || 0}
 - AI 分析帧数：${(history || []).length}
+${difficultyContext}
 
 逐帧分析结果（含 AI 标记标注）：
 ${framesSummary || "无数据"}

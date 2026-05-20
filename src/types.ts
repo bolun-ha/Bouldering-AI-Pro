@@ -34,6 +34,10 @@ export interface SessionData {
   endTime?: number;
   totalErrors: number;
   history: HistoryEntry[];
+  difficulty?: {
+    category: 'simple' | 'medium' | 'hard';
+    grade: string; // 'V0' | 'V1' | ... | 'V8+'
+  };
 }
 
 /** AI 生成的攀爬报告 */

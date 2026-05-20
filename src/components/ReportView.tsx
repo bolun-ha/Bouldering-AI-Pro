@@ -61,6 +61,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
             history: historyData,
             totalErrors: data.totalErrors,
             duration,
+            difficulty: data.difficulty,
           }),
         });
 
