@@ -1,17 +1,7 @@
-import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
-
-// ─── Zhipu AI Configuration ─────────────────────────────────────
+// Netlify Function — Bouldering AI Coach API
 const ZHIPU_API_KEY = "131e668c102648f483a65408ea3a60c5.X8wsvYZ6kck7dPUg";
 const ZHIPU_BASE = "https://open.bigmodel.cn/api/paas/v4";
 
-function zhipuHeaders() {
-  return {
-    Authorization: `Bearer ${ZHIPU_API_KEY}`,
-    "Content-Type": "application/json",
-  };
-}
-
-// ─── AI Bouldering Coach System Instruction ─────────────────────
 const SYSTEM_INSTRUCTION = `你是一位专业的抱石教练。
 你的任务是通过图片分析攀爬姿态，并提供详细的路线推演和动作建议。
 
@@ -28,27 +18,25 @@ const SYSTEM_INSTRUCTION = `你是一位专业的抱石教练。
 - detailed_feedback: string (详细的路线分析、姿态反馈。**字数限制在 60 字以内**，中文)
 - climb_status: 'moving' | 'steady' | 'stuck' | 'falling' | 'finished'`;
 
-// ─── Helper: call Zhipu chat API ────────────────────────────────
-async function zhipuChat(
-  model: string,
-  messages: any[],
-  systemInstruction?: string
-): Promise<string> {
-  const body: any = { model, messages };
+async function zhipuChat(model, messages, systemInstruction) {
+  const body = { model, messages };
   if (systemInstruction) {
     body.messages = [{ role: "system", content: systemInstruction }, ...messages];
   }
 
-  const response = await fetch(`${ZHIPU_BASE}/chat/completions`, {
+  const res = await fetch(`${ZHIPU_BASE}/chat/completions`, {
     method: "POST",
-    headers: zhipuHeaders(),
+    headers: {
+      Authorization: `Bearer ${ZHIPU_API_KEY}`,
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify(body),
   });
 
-  const data = await response.json();
-  if (!response.ok) {
+  const data = await res.json();
+  if (!res.ok) {
     throw new Error(
-      `Zhipu API error (${response.status}): ${
+      `Zhipu error (${res.status}): ${
         typeof data === "object" ? JSON.stringify(data.error || data) : data
       }`
     );
@@ -59,19 +47,17 @@ async function zhipuChat(
   return text;
 }
 
-function extractJSON(text: string): any {
+function extractJSON(text) {
   try {
     return JSON.parse(text);
   } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
+    const m = text.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
     throw new Error("Could not parse AI response as JSON");
   }
 }
 
-// ─── Route handlers ─────────────────────────────────────────────
-
-async function handleAnalyze(body: any) {
+async function handleAnalyze(body) {
   const { image } = body;
   if (!image) return { statusCode: 400, body: JSON.stringify({ error: "Missing image data" }) };
 
@@ -94,22 +80,10 @@ async function handleAnalyze(body: any) {
   return { statusCode: 200, body: JSON.stringify(extractJSON(text)) };
 }
 
-async function handleReport(body: any) {
-  const REPORT_SYSTEM_PROMPT = `你是一位专业的抱石教练。基于用户的攀爬训练数据，生成一份专业的训练评估报告。
-
-请分析用户提供的攀爬数据，考虑以下维度：
-1. 整体表现评分（0-100）
-2. 训练摘要（客观评价整段表现）
-3. 优点（2-3 个具体方面）
-4. 需要改进的弱点（2-3 个具体方面）
-5. 针对性的训练改进建议（2-3 条）
-6. 趋势分析（如果数据点足够多）
-
-必须严格返回 JSON 格式，不要包含任何其他文字。`;
-
+async function handleReport(body) {
   const { history, totalErrors, duration } = body;
   const framesSummary = (history || [])
-    .map((h: any, i: number) =>
+    .map((h, i) =>
       `[帧${i + 1}] 状态:${h.climb_status || "未知"} 反馈:${h.detailed_feedback || "无"} 指令:${h.instruction || "无"} 线路:${h.detected_route_color || "未知"}`
     )
     .join("\n");
@@ -122,17 +96,35 @@ async function handleReport(body: any) {
 ${framesSummary || "无数据"}
 请严格按照 JSON 格式生成专业训练报告。`;
 
-  const text = await zhipuChat("glm-4-flash", [{ role: "user", content: userPrompt }], REPORT_SYSTEM_PROMPT);
+  const text = await zhipuChat(
+    "glm-4-flash",
+    [{ role: "user", content: userPrompt }],
+    `你是一位专业的抱石教练。基于用户的攀爬训练数据，生成一份专业的训练评估报告。
+
+请分析用户提供的攀爬数据，考虑以下维度：
+1. 整体表现评分（0-100）
+2. 训练摘要（客观评价整段表现）
+3. 优点（2-3 个具体方面）
+4. 需要改进的弱点（2-3 个具体方面）
+5. 针对性的训练改进建议（2-3 条）
+6. 趋势分析（如果数据点足够多）
+
+必须严格返回 JSON 格式，不要包含任何其他文字。`
+  );
+
   return { statusCode: 200, body: JSON.stringify(extractJSON(text)) };
 }
 
-async function handleTTS(body: any) {
+async function handleTTS(body) {
   const { text } = body;
   if (!text) return { statusCode: 400, body: JSON.stringify({ error: "Missing text" }) };
 
-  const response = await fetch(`${ZHIPU_BASE}/audio/speech`, {
+  const res = await fetch(`${ZHIPU_BASE}/audio/speech`, {
     method: "POST",
-    headers: zhipuHeaders(),
+    headers: {
+      Authorization: `Bearer ${ZHIPU_API_KEY}`,
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify({
       model: "glm-tts",
       input: text,
@@ -143,50 +135,48 @@ async function handleTTS(body: any) {
     }),
   });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`TTS API error (${response.status}): ${errText}`);
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`TTS error (${res.status}): ${err}`);
   }
 
-  const arrayBuffer = await response.arrayBuffer();
-  const base64 = Buffer.from(arrayBuffer).toString("base64");
-
+  const audioBuf = await res.arrayBuffer();
   return {
     statusCode: 200,
     headers: { "Content-Type": "audio/wav" },
     isBase64Encoded: true,
-    body: base64,
+    body: Buffer.from(audioBuf).toString("base64"),
   };
 }
 
-// ─── Main handler ───────────────────────────────────────────────
-export const handler: Handler = async (event: HandlerEvent, _context: HandlerContext) => {
+export async function handler(event) {
   try {
-    // event.path is e.g. "/.netlify/functions/api/analyze"
-    const path = event.path.replace("/.netlify/functions/api", "").replace(/\/$/, "");
-    const method = event.httpMethod;
+    const path = event.path
+      .replace("/.netlify/functions/api", "")
+      .replace(/\/$/, "");
 
-    console.log(`[${method}] path: ${event.path} → stripped: "${path}"`);
+    console.log(`[${event.httpMethod}] path: ${event.path} → "${path}"`);
 
-    // CORS headers for all responses
     const baseHeaders = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
     };
 
-    // Handle preflight
-    if (method === "OPTIONS") {
+    if (event.httpMethod === "OPTIONS") {
       return { statusCode: 200, headers: baseHeaders, body: "" };
     }
 
-    if (method !== "POST") {
-      return { statusCode: 405, headers: baseHeaders, body: JSON.stringify({ error: "Method not allowed" }) };
+    if (event.httpMethod !== "POST") {
+      return {
+        statusCode: 405,
+        headers: baseHeaders,
+        body: JSON.stringify({ error: "Method not allowed" }),
+      };
     }
 
     const body = JSON.parse(event.body || "{}");
-
-    let result: any;
+    let result;
 
     switch (path) {
       case "/analyze":
@@ -199,19 +189,24 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
         result = await handleTTS(body);
         break;
       default:
-        return { statusCode: 404, headers: baseHeaders, body: JSON.stringify({ error: `Not found: ${path}` }) };
+        return {
+          statusCode: 404,
+          headers: baseHeaders,
+          body: JSON.stringify({ error: `Not found: ${path}` }),
+        };
     }
 
     return {
       ...result,
       headers: { ...baseHeaders, ...(result.headers || {}) },
     };
-  } catch (error: any) {
-    console.error("Function Error:", error);
+  } catch (error) {
+    console.error("Function Error:", error.message);
+    console.error("Stack:", error.stack);
     return {
       statusCode: 500,
       headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" },
-      body: JSON.stringify({ error: error.message || "Internal server error" }),
+      body: JSON.stringify({ error: error.message || "Internal error" }),
     };
   }
-};
+}
