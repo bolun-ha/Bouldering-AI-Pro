@@ -25,9 +25,10 @@ function nextEventId(): string {
 interface GuidancePanelProps {
   result: AnalysisResult | null;
   isAnalyzing: boolean;
+  error?: string | null;
 }
 
-export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzing }) => {
+export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzing, error }) => {
   const lastInstructionRef = useRef<string>("");
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -236,6 +237,27 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
   return (
     <div className="absolute top-20 left-6 right-6 z-30 pointer-events-none">
       <AnimatePresence mode="wait">
+        {/* 错误提示 */}
+        {error && !isAnalyzing && !result && (
+          <motion.div
+            initial={{ y: -20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -20, opacity: 0 }}
+            className="bg-red-950/80 backdrop-blur-md border border-red-700 p-3 rounded-2xl shadow-2xl max-w-sm mx-auto"
+          >
+            <div className="flex items-center gap-2 justify-center">
+              <span className="w-2 h-2 bg-red-500 rounded-full" />
+              <p className="text-red-300 text-xs font-medium text-center">
+                AI 分析异常：{error}
+              </p>
+            </div>
+            <p className="text-red-400/60 text-[10px] text-center mt-1">
+              5 秒后自动重试
+            </p>
+          </motion.div>
+        )}
+
+        {/* 正常分析状态或结果显示 */}
         {(result?.instruction || isAnalyzing) && (
           <motion.div
             initial={{ y: -20, opacity: 0 }}

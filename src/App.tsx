@@ -11,11 +11,13 @@ import { Play, Square, ShieldCheck, Settings, History } from 'lucide-react';
 export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [currentResult, setCurrentResult] = useState<AnalysisResult | null>(null);
   const [showReport, setShowReport] = useState(false);
   const [session, setSession] = useState<SessionData | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [recordedVideoBlob, setRecordedVideoBlob] = useState<Blob | null>(null);
+  const cooldownRef = useRef(false);
 
   // Video 元素引用（传给 VideoRecorder 做合成录制）
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
@@ -57,10 +59,11 @@ export default function App() {
   };
 
   const handleFrame = useCallback(async (canvas: HTMLCanvasElement) => {
-    if (!isRecording || isAnalyzing) return;
+    if (!isRecording || isAnalyzing || cooldownRef.current) return;
 
     try {
       setIsAnalyzing(true);
+      setAnalysisError(null);
       const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
 
       const response = await fetch('/api/analyze', {
@@ -69,7 +72,10 @@ export default function App() {
         body: JSON.stringify({ image: dataUrl })
       });
 
-      if (!response.ok) throw new Error('AI Server Error');
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(errBody.error || response.statusText || 'AI Server Error');
+      }
 
       const result: AnalysisResult = await response.json();
       setCurrentResult(result);
@@ -105,6 +111,10 @@ export default function App() {
 
     } catch (err) {
       console.error("Analysis Failed:", err);
+      setAnalysisError(err instanceof Error ? err.message : '未知错误');
+      // 失败后冷却 5 秒，防止疯狂重试导致闪烁
+      cooldownRef.current = true;
+      setTimeout(() => { cooldownRef.current = false; }, 5000);
     } finally {
       setIsAnalyzing(false);
     }
@@ -174,7 +184,7 @@ export default function App() {
 
         {/* Overlays */}
         <Overlay markers={currentResult?.markers || []} />
-        <GuidancePanel result={currentResult} isAnalyzing={isAnalyzing} />
+        <GuidancePanel result={currentResult} isAnalyzing={isAnalyzing} error={analysisError} />
 
         {/* 录制中提示（录制时显示录制小红点） */}
         {isRecording && (
