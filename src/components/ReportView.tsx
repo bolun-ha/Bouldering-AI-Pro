@@ -3,8 +3,9 @@ import { motion } from 'motion/react';
 import { SessionData, ReportData } from '../types';
 import {
   Trophy, Clock, Target, AlertTriangle, Loader2,
-  ChevronRight, Share2, Play, Download, Camera, Video, Pause, Sparkles, TrendingUp, Lightbulb, ListChecks
+  ChevronRight, Share2, Play, Download, Camera, Video, Pause, Sparkles, TrendingUp, Lightbulb, ListChecks, FileText
 } from 'lucide-react';
+import { generateHtmlReport } from '../utils/generateHtmlReport';
 
 interface ReportViewProps {
   data: SessionData;
@@ -417,28 +418,23 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, onR
           </div>
         </div>
 
-        {/* 导出完整数据 */}
+        {/* 导出 HTML 报告 */}
         <div className="mb-4">
           <button
             onClick={() => {
-              const exportData = {
-                ...data,
-                aiReport: report,
-                hasVideo: !!recordedVideo,
-                snapshotCount: data.history.filter(h => h.snapshot).length
-              };
-              const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+              const html = generateHtmlReport(data, report);
+              const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');
               a.href = url;
-              a.download = `攀爬报告-${new Date(data.startTime).toLocaleDateString()}.json`;
+              a.download = `抱石报告-${new Date(data.startTime).toLocaleDateString()}.html`;
               a.click();
               URL.revokeObjectURL(url);
             }}
             className="w-full bg-slate-900 border border-slate-800 py-3.5 rounded-2xl font-bold text-slate-300 flex items-center justify-center gap-2 hover:bg-slate-800 active:scale-95 transition-all text-sm"
           >
-            <Share2 className="w-4 h-4" />
-            导出 JSON 报告
+            <FileText className="w-4 h-4" />
+            导出 HTML 报告
           </button>
         </div>
 
