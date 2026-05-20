@@ -39,14 +39,14 @@ markers 用于在图片上标注关键位置。每个标记包含：
 
 ### 纯中文要求
 **注意：以下所有字段的值必须使用纯中文，不允许出现英文单词：**
-- `label`：纯中文，如"膝盖内扣"，不要写"knee inward"
-- `description`：纯中文
-- `instruction`：纯中文，不超过20个字
-- `detailed_feedback`：纯中文，150字以内
-- `detected_route_color`：纯中文，如"红色""蓝色"
+- 「label」字段：纯中文，如「膝盖内扣」，不要写「knee inward」
+- 「description」字段：纯中文
+- 「instruction」字段：纯中文，不超过20个字
+- 「detailed_feedback」字段：纯中文，150字以内
+- 「detected_route_color」字段：纯中文，如「红色」「蓝色」
 - 不允许在以上字段中出现任何英文字母或英文标点
 
-JSON 字段名本身（markers, type, label 等）保留英文，这是格式要求，不违反纯中文规则。
+JSON 字段名本身（markers、type、label 等）保留英文，这是格式要求，不违反纯中文规则。
 
 ### 线路规则
 - 首先观察攀爬者接触或踩踏的支点颜色，以此确定本次攀爬的目标颜色线路
