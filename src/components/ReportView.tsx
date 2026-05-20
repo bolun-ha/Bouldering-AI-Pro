@@ -264,24 +264,30 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, onR
                           </div>
                         )}
 
-                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3">
+                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/95 via-slate-950/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3">
                           <span className="text-[9px] font-mono text-orange-400 uppercase tracking-wider">
                             #{(idx + 1).toString().padStart(2, '0')} · {Math.floor(idx * 1.8)}s
                           </span>
-                          <span className="text-[9px] text-slate-500 mt-0.5">
-                            {(() => {
-                              const errors = entry.result.markers.filter(m => m.type === 'error').length;
-                              const warnings = entry.result.markers.filter(m => m.type === 'warning').length;
-                              const successes = entry.result.markers.filter(m => m.type === 'success').length;
-                              const parts: string[] = [];
-                              if (errors) parts.push(`❌${errors}`);
-                              if (warnings) parts.push(`⚠️${warnings}`);
-                              if (successes) parts.push(`✅${successes}`);
-                              return parts.join(' ') || '无标记';
-                            })()}
-                          </span>
+
+                          {/* Marker labels */}
+                          {entry.result.markers.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {entry.result.markers.map((m, mi) => {
+                                const c = m.type === 'error' ? 'bg-red-500/30 text-red-300 border-red-500/40' :
+                                         m.type === 'warning' ? 'bg-orange-500/30 text-orange-300 border-orange-500/40' :
+                                         m.type === 'success' ? 'bg-emerald-500/30 text-emerald-300 border-emerald-500/40' :
+                                         'bg-blue-500/30 text-blue-300 border-blue-500/40';
+                                return (
+                                  <span key={mi} className={`text-[9px] px-1.5 py-0.5 rounded border ${c} leading-tight`}>
+                                    {m.label}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+
                           {entry.result.detailed_feedback && (
-                            <span className="text-[10px] text-slate-300 mt-0.5 line-clamp-2 leading-relaxed">
+                            <span className="text-[10px] text-slate-200 mt-1 leading-relaxed">
                               {entry.result.detailed_feedback}
                             </span>
                           )}
