@@ -144,8 +144,17 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
       isRecordingRef.current = true;
 
       // 匹配 video 尺寸
-      canvas.width = video.videoWidth || 1280;
-      canvas.height = video.videoHeight || 720;
+      // 设为摄像头原生分辨率，上限 1080p
+      const maxDim = 1080;
+      let w = video.videoWidth || 1280;
+      let h = video.videoHeight || 720;
+      if (w > maxDim || h > maxDim) {
+        const ratio = Math.min(maxDim / w, maxDim / h);
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+      }
+      canvas.width = w;
+      canvas.height = h;
 
       // 检查 MediaRecorder 支持
       if (!window.MediaRecorder) {
@@ -202,8 +211,8 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
     <canvas
       ref={canvasRef}
       className="hidden"
-      width="1280"
-      height="720"
+      width="1920"
+      height="1080"
     />
   );
 };

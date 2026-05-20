@@ -75,8 +75,10 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      // 分析帧统一缩放到 1280×720，控制 AI 成本与速度
+      const scale = Math.min(1280 / (video.videoWidth || 1280), 720 / (video.videoHeight || 720));
+      canvas.width = Math.round((video.videoWidth || 1280) * scale);
+      canvas.height = Math.round((video.videoHeight || 720) * scale);
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
