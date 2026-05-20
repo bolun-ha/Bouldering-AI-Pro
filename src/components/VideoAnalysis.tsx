@@ -1,8 +1,26 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Upload, Play, Square, FileVideo, RotateCcw } from 'lucide-react';
+import { Upload, Play, Square, FileVideo, Radio, Activity } from 'lucide-react';
 import { AnalysisResult, SessionData, HistoryEntry, ReportData } from '../types';
 import { ReportView } from './ReportView';
+
+/**
+ * 本地像素对比 — 检测视频帧是否发生明显变化
+ * 在前端过滤静止画面，减少 API 调用，规避限流
+ */
+function pixelDiffPercent(current: Uint8ClampedArray, previous: Uint8ClampedArray): number {
+  if (previous.length === 0) return 100; // 第一帧，肯定变化
+  let changed = 0;
+  const total = current.length;
+  // 每隔 16 个字节采样一次（跳过 3/4 像素，兼顾性能）
+  for (let i = 0; i < total; i += 16) {
+    const r = Math.abs(current[i] - previous[i]);
+    const g = Math.abs(current[i + 1] - previous[i + 1]);
+    const b = Math.abs(current[i + 2] - previous[i + 2]);
+    if (r + g + b > 80) changed++;
+  }
+  return (changed / (total / 16)) * 100;
+}
 
 export function VideoAnalysis() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -10,19 +28,24 @@ export function VideoAnalysis() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [frameCount, setFrameCount] = useState(0);
+  const [skipCount, setSkipCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [showReport, setShowReport] = useState(false);
   const [videoDuration, setVideoDuration] = useState(0);
+  const [status, setStatus] = useState<'idle' | 'waiting' | 'analyzing'>('idle');
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);       // 640x360 截帧
+  const compareCanvasRef = useRef<HTMLCanvasElement>(null); // 160x90 像素对比
   const sessionRef = useRef<SessionData | null>(null);
   const isAnalyzingRef = useRef(false);
   const intervalRef = useRef<number | null>(null);
   const frameCounterRef = useRef(0);
+  const skipCounterRef = useRef(0);
+  const prevPixelRef = useRef<Uint8ClampedArray | null>(null);
+  const lastApiCallRef = useRef(0);
 
-  // 每次 render 同步 sessionRef
   sessionRef.current = sessionData;
 
   // 清理 URL 对象
@@ -35,8 +58,6 @@ export function VideoAnalysis() {
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    // 清理旧的 URL
     if (videoUrl) URL.revokeObjectURL(videoUrl);
 
     const url = URL.createObjectURL(file);
@@ -46,23 +67,22 @@ export function VideoAnalysis() {
     setSessionData(null);
     setProgress(0);
     setFrameCount(0);
+    setSkipCount(0);
     setError(null);
+    prevPixelRef.current = null;
   }, [videoUrl]);
 
   const stopAnalysis = useCallback(() => {
     const video = videoRef.current;
-    if (video) {
-      video.pause();
-    }
+    if (video) video.pause();
     isAnalyzingRef.current = false;
     setIsAnalyzing(false);
-
+    setStatus('idle');
     if (intervalRef.current !== null) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
 
-    // 生成报告
     const session = sessionRef.current;
     if (!session || session.history.length === 0) {
       setError('没有生成有效的分析数据');
@@ -114,7 +134,8 @@ export function VideoAnalysis() {
   const startAnalysis = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas) return;
+    const compareCanvas = compareCanvasRef.current;
+    if (!video || !canvas || !compareCanvas) return;
 
     // 重置
     const newSession: SessionData = {
@@ -125,19 +146,23 @@ export function VideoAnalysis() {
     setSessionData(newSession);
     sessionRef.current = newSession;
     frameCounterRef.current = 0;
+    skipCounterRef.current = 0;
+    prevPixelRef.current = null;
     isAnalyzingRef.current = true;
     setIsAnalyzing(true);
     setProgress(0);
     setFrameCount(0);
+    setSkipCount(0);
     setError(null);
+    setStatus('waiting');
 
     // 从头播放
     video.currentTime = 0;
     video.play();
 
-    // 每隔 3 秒截帧分析
+    // 500ms 检查一次（比固定 3s 精细 6 倍 + 本地过滤 → 实际约 1-1.5 QPS）
     intervalRef.current = window.setInterval(async () => {
-      if (!isAnalyzingRef.current || !video || !canvas) {
+      if (!isAnalyzingRef.current || !video || !canvas || !compareCanvas) {
         if (intervalRef.current !== null) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
@@ -150,7 +175,32 @@ export function VideoAnalysis() {
         return;
       }
 
-      // 截帧
+      // --- 1. 像素对比：判断是否有明显动作变化 ---
+      const compCtx = compareCanvas.getContext('2d');
+      if (!compCtx) return;
+
+      const cw = 160, ch = 90;
+      compareCanvas.width = cw;
+      compareCanvas.height = ch;
+      compCtx.drawImage(video, 0, 0, cw, ch);
+      const currentPixels = compCtx.getImageData(0, 0, cw, ch).data;
+
+      const diff = pixelDiffPercent(currentPixels, prevPixelRef.current || new Uint8ClampedArray());
+      prevPixelRef.current = new Uint8ClampedArray(currentPixels); // 存副本
+
+      // 变化 < 4% → 跳过，不调用 API
+      if (diff < 4) {
+        skipCounterRef.current++;
+        setSkipCount(skipCounterRef.current);
+        setStatus('waiting');
+        // 更新进度（基于视频实际时间）
+        const dur = videoDuration || video.duration || 60;
+        setProgress(Math.min(95, Math.round((video.currentTime / dur) * 100)));
+        return;
+      }
+
+      // --- 2. 动作变化明显 → 截帧分析 ---
+      setStatus('analyzing');
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
@@ -174,6 +224,7 @@ export function VideoAnalysis() {
           throw new Error(errBody.error || `HTTP ${response.status}`);
         }
 
+        lastApiCallRef.current = Date.now();
         const result: AnalysisResult = await response.json();
 
         // 缩略图快照
@@ -190,42 +241,32 @@ export function VideoAnalysis() {
               snapshot = thumbCanvas.toDataURL('image/jpeg', 0.35);
             }
           }
-        } catch (_) { /* 缩略图失败不影响主流程 */ }
+        } catch (_) { /* 缩略图失败不影响 */ }
 
         const entry: HistoryEntry = { result, snapshot };
         const errors = result.markers.filter(m => m.type === 'error').length;
 
-        // 更新 session
         setSessionData(prev => {
           if (!prev) return prev;
-          return {
-            ...prev,
-            totalErrors: prev.totalErrors + errors,
-            history: [...prev.history, entry],
-          };
+          return { ...prev, totalErrors: prev.totalErrors + errors, history: [...prev.history, entry] };
         });
         setFrameCount(frameNum);
 
-        // 根据视频总时长估算进度
+        // 进度基于视频实际已播放时长
         const dur = videoDuration || video.duration || 60;
-        const estTotalFrames = Math.floor(dur / 3);
-        setProgress(Math.min(95, Math.round((frameNum / Math.max(estTotalFrames, 1)) * 100)));
+        setProgress(Math.min(95, Math.round((video.currentTime / dur) * 100)));
       } catch (err) {
         console.error('Frame analysis failed:', err);
         // 单帧失败继续
       }
-    }, 3000);
+    }, 500); // 检查间隔 500ms
   }, [stopAnalysis, videoDuration]);
 
-  // 视频元数据加载完成
   const handleMetadataLoaded = useCallback(() => {
     const video = videoRef.current;
-    if (video) {
-      setVideoDuration(video.duration);
-    }
+    if (video) setVideoDuration(video.duration);
   }, []);
 
-  // 清除
   const resetAll = useCallback(() => {
     if (intervalRef.current !== null) {
       clearInterval(intervalRef.current);
@@ -233,6 +274,7 @@ export function VideoAnalysis() {
     }
     isAnalyzingRef.current = false;
     setIsAnalyzing(false);
+    setStatus('idle');
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoFile(null);
     setVideoUrl(null);
@@ -240,6 +282,7 @@ export function VideoAnalysis() {
     setShowReport(false);
     setProgress(0);
     setError(null);
+    prevPixelRef.current = null;
   }, [videoUrl]);
 
   return (
@@ -274,7 +317,7 @@ export function VideoAnalysis() {
         </motion.div>
       )}
 
-      {/* 隐藏的视频和画布 */}
+      {/* 隐藏：视频源 + 分析画布 + 像素对比画布 */}
       <video
         ref={videoRef}
         src={videoUrl || undefined}
@@ -282,7 +325,8 @@ export function VideoAnalysis() {
         style={{ display: 'none' }}
         playsInline
       />
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
+      <canvas ref={canvasRef} width={640} height={360} style={{ display: 'none' }} />
+      <canvas ref={compareCanvasRef} width={160} height={90} style={{ display: 'none' }} />
 
       {/* 已选视频 + 控制按钮 */}
       {videoFile && !isAnalyzing && !showReport && (
@@ -323,15 +367,36 @@ export function VideoAnalysis() {
           className="flex flex-col items-center gap-4 w-full max-w-md"
         >
           <div className="w-full bg-slate-900 rounded-2xl p-6 border border-slate-800">
-            <div className="w-full bg-slate-800 rounded-full h-3 mb-3 overflow-hidden">
+            {/* 进度条 */}
+            <div className="w-full bg-slate-800 rounded-full h-3 mb-4 overflow-hidden">
               <div
-                className="bg-orange-500 h-full rounded-full transition-all duration-500 ease-out"
+                className="bg-orange-500 h-full rounded-full transition-all duration-300 ease-out"
                 style={{ width: `${Math.min(100, progress)}%` }}
               />
             </div>
-            <div className="flex justify-between text-xs text-slate-500">
+
+            {/* 状态行 */}
+            <div className="flex items-center justify-between text-xs mb-3">
+              <div className="flex items-center gap-2">
+                {status === 'waiting' ? (
+                  <>
+                    <Activity className="w-3.5 h-3.5 text-slate-500" />
+                    <span className="text-slate-500">动作检测中</span>
+                  </>
+                ) : (
+                  <>
+                    <Radio className="w-3.5 h-3.5 text-orange-400 animate-pulse" />
+                    <span className="text-orange-400 font-bold">分析中</span>
+                  </>
+                )}
+              </div>
+              <span className="text-slate-500">{progress}%</span>
+            </div>
+
+            {/* 统计 */}
+            <div className="flex justify-between text-xs text-slate-600">
               <span>已分析 {frameCount} 帧</span>
-              <span>{progress}%</span>
+              {skipCount > 0 && <span>跳过 {skipCount} 帧（静止）</span>}
             </div>
           </div>
 
