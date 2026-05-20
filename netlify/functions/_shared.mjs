@@ -49,12 +49,11 @@ markers 用于在图片上标注关键位置。每个标记包含：
 - 支点形状
 - 用哪只手脚最合理
 
-必须使用中文提供反馈。
-返回一个 JSON 对象，包含：
-- markers: { x: number (0-100), y: number (0-100), type: 'error' | 'warning' | 'info' | 'success', label: string, description: string } 数组
-- instruction: string（必须提供，简短直接的行动指令）
-- detected_route_color: string（识别出的线路颜色）
-- detailed_feedback: string（**150字以内**，具体的姿态反馈和动作纠正分析，用于事后报告）
+必须使用纯中文提供所有反馈（仅 JSON 字段名保留英文）。返回一个 JSON 对象，包含：
+- markers: { x: number (0-100), y: number (0-100), type: 'error' | 'warning' | 'info' | 'success', label: string（中文标签）, description: string（中文描述） } 数组
+- instruction: string（必须提供，纯中文，简短直接的行动指令）
+- detected_route_color: string（纯中文，识别出的线路颜色）
+- detailed_feedback: string（纯中文，**150字以内**，具体的姿态反馈和动作纠正分析，用于事后报告）
 - climb_status: 'moving' | 'steady' | 'stuck' | 'falling' | 'finished'`;
 
 export async function zhipuChat(model, messages, systemInstruction) {
