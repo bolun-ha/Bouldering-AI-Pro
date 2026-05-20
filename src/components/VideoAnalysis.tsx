@@ -217,11 +217,11 @@ export function VideoAnalysis() {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      canvas.width = 640;
-      canvas.height = 360;
-      ctx.drawImage(video, 0, 0, 640, 360);
+      canvas.width = 960;
+      canvas.height = 540;
+      ctx.drawImage(video, 0, 0, 960, 540);
 
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
       frameCounterRef.current++;
       const frameNum = frameCounterRef.current;
 
@@ -254,7 +254,7 @@ export function VideoAnalysis() {
               thumbCtx.drawImage(video, 0, 0, thumbCanvas.width, thumbCanvas.height);
               // 再画 AI 标注
               drawMarkers(thumbCtx, thumbCanvas.width, thumbCanvas.height, result.markers, result.detected_route_color);
-              snapshot = thumbCanvas.toDataURL('image/jpeg', 0.35);
+              snapshot = thumbCanvas.toDataURL('image/jpeg', 0.75);
             }
           }
         } catch (_) { /* 缩略图失败不影响 */ }

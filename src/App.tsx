@@ -67,7 +67,7 @@ export default function App() {
     try {
       setIsAnalyzing(true);
       setAnalysisError(null);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
 
       const response = await fetch('/api/analyze', {
         method: 'POST',
@@ -97,7 +97,7 @@ export default function App() {
             thumbCtx.drawImage(video, 0, 0, thumbCanvas.width, thumbCanvas.height);
             // 画 AI 标注
             drawMarkers(thumbCtx, thumbCanvas.width, thumbCanvas.height, result.markers, result.detected_route_color);
-            snapshot = thumbCanvas.toDataURL('image/jpeg', 0.35);
+            snapshot = thumbCanvas.toDataURL('image/jpeg', 0.75);
           }
         }
       } catch (_) { /* 缩略图失败不影响主流程 */ }
