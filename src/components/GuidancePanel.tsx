@@ -101,16 +101,16 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
                   event_id: nextEventId(),
                   type: 'session.update',
                   session: {
-                    model: 'glm-realtime-flash',
-                    modalities: ['audio'],
+                    modalities: ['text', 'audio'],
+                    instructions: '你是一个抱石教练语音助手。用户发送指令文本，你只需用自然口语简短读出，不做解释或回应。控制在20字以内。',
                     voice: 'tongtong',
                     output_audio_format: 'mp3',
-                    turn_detection: null,
                   },
                 }));
                 break;
 
               case 'session.updated':
+                console.log('WS session.updated:', msg);
                 // Session ready — send text instruction
                 ws.send(JSON.stringify({
                   event_id: nextEventId(),
@@ -126,7 +126,8 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
                   event_id: nextEventId(),
                   type: 'response.create',
                   response: {
-                    modalities: ['audio'],
+                    modalities: ['text', 'audio'],
+                    output_audio_format: 'mp3',
                   },
                 }));
                 break;
