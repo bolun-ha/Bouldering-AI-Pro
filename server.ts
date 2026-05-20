@@ -64,11 +64,23 @@ async function zhipuChat(
 
   // vision 模型不支持 response_format，所以不传 json_object
 
-  const response = await fetch(`${ZHIPU_BASE}/chat/completions`, {
+  let response = await fetch(`${ZHIPU_BASE}/chat/completions`, {
     method: "POST",
     headers: zhipuHeaders(),
     body: JSON.stringify(body),
   });
+
+  // 429 重试：最多 3 次，指数退避
+  for (let attempt = 1; response.status === 429 && attempt <= 3; attempt++) {
+    const waitMs = Math.min(2000 * Math.pow(2, attempt - 1), 8000);
+    console.warn(`Zhipu 429 rate limited (attempt ${attempt}/3), waiting ${waitMs}ms`);
+    await new Promise(r => setTimeout(r, waitMs));
+    response = await fetch(`${ZHIPU_BASE}/chat/completions`, {
+      method: "POST",
+      headers: zhipuHeaders(),
+      body: JSON.stringify(body),
+    });
+  }
 
   const data = await response.json();
   if (!response.ok) {
@@ -107,7 +119,7 @@ app.post("/api/analyze", async (req, res) => {
       : `data:image/jpeg;base64,${image}`;
 
     const text = await zhipuChat(
-      "glm-5v-turbo", // 视觉模型
+      "glm-4.6v-flash", // 视觉模型
       [
         {
           role: "user",
