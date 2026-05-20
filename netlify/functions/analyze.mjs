@@ -27,7 +27,8 @@ export async function handler(event) {
       SYSTEM_INSTRUCTION
     );
 
-    return { statusCode: 200, headers: corsHeaders, body: JSON.stringify(extractJSON(text)) };
+    const result = extractJSON(text);
+    return { statusCode: 200, headers: corsHeaders, body: JSON.stringify(result) };
   } catch (error) {
     console.error("analyze Error:", error.message);
     return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: error.message }) };

@@ -92,14 +92,10 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
             event_id: nextEventId(),
             type: 'session.update',
             session: {
-              model: 'glm-realtime-flash',
-              modalities: ['text', 'audio'],
-              instructions: '你是一个抱石教练语音助手。用户发送指令文本，你只需用自然口语简短读出，不做解释或回应。控制在20字以内。',
+              modalities: ['audio'],
               voice: 'tongtong',
-              input_audio_format: 'wav',
               output_audio_format: 'mp3',
-              turn_detection: null, // 纯 TTS，不需要 VAD
-              beta_fields: { chat_mode: 'audio', tts_source: 'e2e' },
+              turn_detection: null,
             },
           }));
           // Send instruction after session config
@@ -117,8 +113,7 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
             event_id: nextEventId(),
             type: 'response.create',
             response: {
-              modalities: ['text', 'audio'],
-              output_audio_format: 'mp3',
+              modalities: ['audio'],
             },
           }));
         };

@@ -72,11 +72,24 @@ export async function zhipuChat(model, messages, systemInstruction) {
 }
 
 export function extractJSON(text) {
+  // Try direct parse first
   try {
     return JSON.parse(text);
   } catch {
-    const m = text.match(/\{[\s\S]*\}/);
-    if (m) return JSON.parse(m[0]);
+    // Try markdown code blocks
+    const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      try {
+        return JSON.parse(codeBlockMatch[1].trim());
+      } catch {}
+    }
+    // Try bare {…} extraction
+    const braceMatch = text.match(/\{[\s\S]*\}/);
+    if (braceMatch) {
+      try {
+        return JSON.parse(braceMatch[0]);
+      } catch {}
+    }
     throw new Error("Could not parse AI response as JSON");
   }
 }
