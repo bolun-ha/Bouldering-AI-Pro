@@ -14,8 +14,19 @@ export function generateHtmlReport(
   const score = report?.overallScore ?? 0;
   const scoreColor = score >= 70 ? '#10b981' : score >= 50 ? '#f97316' : '#ef4444';
 
-  // 构建关键帧 HTML
-  const snapshotsHtml = session.history
+  // 按问题集中度排序：错误多的在前，同错误按警告数排，问题帧优先于无问题帧
+  const sortedHistory = [...session.history].sort((a, b) => {
+    const aErr = a.result.markers.filter(m => m.type === 'error').length;
+    const bErr = b.result.markers.filter(m => m.type === 'error').length;
+    if (aErr !== bErr) return bErr - aErr;
+    const aWarn = a.result.markers.filter(m => m.type === 'warning').length;
+    const bWarn = b.result.markers.filter(m => m.type === 'warning').length;
+    if (aWarn !== bWarn) return bWarn - aWarn;
+    return 0;
+  });
+
+  // 构建关键帧 HTML（按问题排序）
+  const snapshotsHtml = sortedHistory
     .map((entry, i) => {
       if (!entry.snapshot) return '';
       const timeEstimate = Math.floor(i * 1.8);
@@ -148,7 +159,7 @@ body {
 .snapshot-card {
   background: #1e293b; border: 1px solid #334155; border-radius: 16px; overflow: hidden;
 }
-.snapshot-card img { width: 100%; display: block; aspect-ratio: 16/9; object-fit: cover; }
+.snapshot-card img { width: 100%; display: block; object-fit: contain; aspect-ratio: auto; background: #000; }
 .snapshot-meta {
   display: flex; gap: 8px; padding: 6px 10px;
   font-size: 10px; font-family: "SF Mono", monospace; color: #64748b;
@@ -171,7 +182,7 @@ body {
 }
 @media (max-width: 480px) {
   .stats { grid-template-columns: 1fr 1fr; }
-  .snapshots-grid { grid-template-columns: 1fr; }
+  .snapshots-grid { grid-template-columns: 1fr; gap: 16px; }
   .score-number { font-size: 48px; }
 }
 </style>

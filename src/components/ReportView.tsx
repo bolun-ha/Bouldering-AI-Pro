@@ -247,16 +247,31 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, onR
                   </p>
                 ) : (
                   <div className="grid grid-cols-2 gap-3">
-                    {data.history.map((entry, idx) => (
+                    {(() => {
+                      // 按问题集中度排序：错误多的在前
+                      const sorted = [...data.history].sort((a, b) => {
+                        const aErr = a.result.markers.filter(m => m.type === 'error').length;
+                        const bErr = b.result.markers.filter(m => m.type === 'error').length;
+                        if (aErr !== bErr) return bErr - aErr;
+                        const aWarn = a.result.markers.filter(m => m.type === 'warning').length;
+                        const bWarn = b.result.markers.filter(m => m.type === 'warning').length;
+                        if (aWarn !== bWarn) return bWarn - aWarn;
+                        return 0;
+                      });
+                      return sorted.map((entry, idx) => {
+                        // 找出原始索引（用于显示帧号）
+                        const origIdx = data.history.indexOf(entry);
+                        return (
                       <div
-                        key={idx}
-                        className="relative group rounded-2xl overflow-hidden bg-slate-800 aspect-video"
+                        key={origIdx}
+                        className="relative group rounded-2xl overflow-hidden bg-slate-900"
+                        style={{ aspectRatio: 'auto' }}
                       >
                         {entry.snapshot ? (
                           <img
                             src={entry.snapshot}
-                            alt={`帧 ${idx + 1}`}
-                            className="w-full h-full object-cover"
+                            alt={`帧 ${origIdx + 1}`}
+                            className="w-full h-full object-contain bg-black"
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-slate-600">
@@ -266,7 +281,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, onR
 
                         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/95 via-slate-950/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3">
                           <span className="text-[9px] font-mono text-orange-400 uppercase tracking-wider">
-                            #{(idx + 1).toString().padStart(2, '0')} · {Math.floor(idx * 1.8)}s
+                            #{(origIdx + 1).toString().padStart(2, '0')} · {Math.floor(origIdx * 1.8)}s
                           </span>
 
                           {/* Marker labels */}
@@ -300,7 +315,9 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, onR
                           </button>
                         </div>
                       </div>
-                    ))}
+                    );
+                  });
+                })()}
                   </div>
                 )}
               </div>
