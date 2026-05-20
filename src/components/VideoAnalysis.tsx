@@ -33,8 +33,9 @@ export function VideoAnalysis() {
   const [error, setError] = useState<string | null>(null);
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
   const [showReport, setShowReport] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
   const [videoDuration, setVideoDuration] = useState(0);
-  const [status, setStatus] = useState<'idle' | 'waiting' | 'analyzing'>('idle');
+  const [status, setStatus] = useState<'idle' | 'waiting' | 'analyzing' | 'reporting'>('idle');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);       // 640x360 截帧
@@ -78,7 +79,8 @@ export function VideoAnalysis() {
     if (video) video.pause();
     isAnalyzingRef.current = false;
     setIsAnalyzing(false);
-    setStatus('idle');
+    setStatus('reporting');
+    setReportLoading(true);
     if (intervalRef.current !== null) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -130,9 +132,13 @@ export function VideoAnalysis() {
 
         setProgress(100);
         setShowReport(true);
+        setReportLoading(false);
+        setStatus('idle');
         setSessionData(session);
       } catch (err) {
         setError(err instanceof Error ? err.message : '报告生成失败');
+        setReportLoading(false);
+        setStatus('idle');
       }
     })();
   }, []);
@@ -156,6 +162,7 @@ export function VideoAnalysis() {
     prevPixelRef.current = null;
     isAnalyzingRef.current = true;
     setIsAnalyzing(true);
+    setReportLoading(false);
     setProgress(0);
     setFrameCount(0);
     setSkipCount(0);
@@ -283,6 +290,7 @@ export function VideoAnalysis() {
     }
     isAnalyzingRef.current = false;
     setIsAnalyzing(false);
+    setReportLoading(false);
     setStatus('idle');
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoFile(null);
@@ -338,7 +346,7 @@ export function VideoAnalysis() {
       <canvas ref={compareCanvasRef} width={160} height={90} style={{ display: 'none' }} />
 
       {/* 已选视频 + 控制按钮 */}
-      {videoFile && !isAnalyzing && !showReport && (
+      {videoFile && !isAnalyzing && !showReport && !reportLoading && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -415,6 +423,27 @@ export function VideoAnalysis() {
           >
             <Square className="w-5 h-5" /> 停止分析
           </button>
+        </motion.div>
+      )}
+
+      {/* 报告生成中（过渡动画） */}
+      {reportLoading && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="flex flex-col items-center gap-4 w-full max-w-md"
+        >
+          <div className="w-full bg-slate-900 rounded-2xl p-8 border border-slate-800 text-center">
+            <motion.div
+              animate={{ scale: [1, 1.15, 1] }}
+              transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+              className="w-16 h-16 bg-orange-600/20 rounded-3xl flex items-center justify-center mx-auto mb-5"
+            >
+              <div className="w-8 h-8 border-3 border-orange-500 border-t-transparent rounded-full animate-spin" />
+            </motion.div>
+            <p className="text-orange-400 font-bold text-base mb-1">AI 正在生成训练报告</p>
+            <p className="text-slate-500 text-xs">正在综合分析 {frameCount} 帧数据，生成评分与建议...</p>
+          </div>
         </motion.div>
       )}
 
