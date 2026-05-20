@@ -63,7 +63,7 @@ export default function App() {
     }
   };
 
-  const handleFrame = useCallback(async (canvas: HTMLCanvasElement) => {
+  const handleFrame = useCallback(async (canvas: HTMLCanvasElement, landmarksSnapshot: string = '') => {
     if (!isRecording || isAnalyzing || cooldownRef.current) return;
 
     try {
@@ -71,10 +71,15 @@ export default function App() {
       setAnalysisError(null);
       const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
 
+      const body: any = { image: dataUrl };
+      if (landmarksSnapshot) {
+        body.pose = landmarksSnapshot;
+      }
+
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: dataUrl })
+        body: JSON.stringify(body)
       });
 
       if (!response.ok) {
@@ -127,6 +132,28 @@ export default function App() {
     }
   }, [isRecording, isAnalyzing]);
 
+  // MediaPipe 实时姿态标记
+  const handlePoseMarkers = useCallback((markers: import('./types').Marker[], _landmarks: any) => {
+    if (markers.length === 0) return;
+    setCurrentResult(prev => {
+      if (!prev) {
+        // 无 AI 结果时，创建临时结果仅用于展示标记
+        return {
+          markers,
+          instruction: '',
+          detailed_feedback: '',
+          detected_route_color: '',
+          climb_status: 'moving',
+        };
+      }
+      // 合并：MediaPipe 规则标记（error/warning）+ AI 标记（success/info）
+      const ruleMarkers = markers.filter(m => m.type === 'error' || m.type === 'warning');
+      const aiMarkers = prev.markers.filter(m => m.type === 'success' || m.type === 'info');
+      const combined = [...ruleMarkers, ...aiMarkers];
+      return { ...prev, markers: combined };
+    });
+  }, []);
+
   return (
     <div className="relative h-screen w-screen bg-slate-950 font-sans text-slate-200 overflow-hidden flex flex-col">
       {/* Mobile-First Header */}
@@ -175,6 +202,7 @@ export default function App() {
           <>
             <CameraStream
               onFrame={handleFrame}
+              onPoseMarkers={handlePoseMarkers}
               isRecording={isRecording}
               captureInterval={1800}
               onError={setCameraError}

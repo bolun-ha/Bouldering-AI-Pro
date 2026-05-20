@@ -1,4 +1,4 @@
-// POST /.netlify/functions/analyze — Frame analysis via GLM-4.6V-Flash
+// POST /.netlify/functions/analyze — Frame analysis via GLM-4V-Flash
 import { zhipuChat, extractJSON, corsHeaders, handleOptions, SYSTEM_INSTRUCTION } from "./_shared.mjs";
 
 export async function handler(event) {
@@ -8,10 +8,16 @@ export async function handler(event) {
   }
 
   try {
-    const { image } = JSON.parse(event.body || "{}");
+    const body = JSON.parse(event.body || "{}");
+    const { image, pose } = body;
     if (!image) return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: "Missing image data" }) };
 
     const imageUrl = image.startsWith("data:") ? image : `data:image/jpeg;base64,${image}`;
+
+    let analysisPrompt = "根据指令分析这张攀爬图片。";
+    if (pose) {
+      analysisPrompt = `图片附带的实时骨骼坐标（像素位置）：${pose}\n\n根据以上坐标和图片共同分析这张攀爬姿态。`;
+    }
 
     const text = await zhipuChat(
       "glm-4v-flash",
@@ -20,7 +26,7 @@ export async function handler(event) {
           role: "user",
           content: [
             { type: "image_url", image_url: { url: imageUrl } },
-            { type: "text", text: "Analyze this bouldering frame according to your coach instructions. BE CONCISE." },
+            { type: "text", text: analysisPrompt },
           ],
         },
       ],

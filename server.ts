@@ -153,13 +153,18 @@ function extractJSON(text: string): any {
 // ─── POST /api/analyze — Frame analysis (vision) ────────────────
 app.post("/api/analyze", async (req, res) => {
   try {
-    const { image } = req.body;
+    const { image, pose } = req.body;
     if (!image) return res.status(400).json({ error: "Missing image data" });
 
     // Ensure the image is a full data-url
     const imageUrl = image.startsWith("data:")
       ? image
       : `data:image/jpeg;base64,${image}`;
+
+    let analysisPrompt = "根据指令分析这张攀爬图片。";
+    if (pose) {
+      analysisPrompt = `图片附带的实时骨骼坐标（像素位置）：${pose}\n\n根据以上坐标和图片共同分析这张攀爬姿态。`;
+    }
 
     const text = await zhipuChat(
       "glm-4v-flash", // 视觉模型
@@ -170,7 +175,7 @@ app.post("/api/analyze", async (req, res) => {
             { type: "image_url", image_url: { url: imageUrl } },
             {
               type: "text",
-              text: "Analyze this bouldering frame according to your coach instructions. BE CONCISE.",
+              text: analysisPrompt,
             },
           ],
         },
