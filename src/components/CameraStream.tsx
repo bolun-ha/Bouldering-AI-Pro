@@ -16,6 +16,7 @@ import {
   landmarksToSnapshot,
   handLandmarksToSnapshot,
 } from '../utils/poseEngine';
+import { applyContourOverlay } from '../utils/contourOverlay';
 import { analyzePose } from '../utils/poseRules';
 import type { Marker, HandResult } from '../types';
 
@@ -170,6 +171,11 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // 岩点轮廓描边增强（帮助 AI 看清岩点边界）
+    try {
+      applyContourOverlay(canvas, 0.15, '#ff6600');
+    } catch (_) { /* 轮廓增强失败不影响截帧 */ }
 
     let poseSnapshot = '';
     if (poseLandmarksRef.current.length > 0) {
