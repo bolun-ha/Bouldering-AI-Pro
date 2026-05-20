@@ -11,10 +11,11 @@ import { smartFilterSnapshots } from '../utils/smartFilterSnapshots';
 interface ReportViewProps {
   data: SessionData;
   recordedVideo: Blob | null;
+  recordedRawBlob?: Blob | null;
   onReset: () => void;
 }
 
-export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, onReset }) => {
+export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, recordedRawBlob, onReset }) => {
   const duration = data.endTime ? Math.floor((data.endTime - data.startTime) / 1000) : 0;
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -25,8 +26,12 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, onR
 
   // 录制视频 URL（用 ref 避免重复创建导致对象泄漏）
   const videoUrlRef = useRef<string | null>(null);
+  const rawVideoUrlRef = useRef<string | null>(null);
   if (recordedVideo && !videoUrlRef.current) {
     videoUrlRef.current = URL.createObjectURL(recordedVideo);
+  }
+  if (recordedRawBlob && !rawVideoUrlRef.current) {
+    rawVideoUrlRef.current = URL.createObjectURL(recordedRawBlob);
   }
 
   // ─── AI 报告生成 ─────────────────────────────────────────────
@@ -224,8 +229,22 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, onR
                     className="flex-1 bg-slate-800 hover:bg-slate-700 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
                   >
                     <Download className="w-4 h-4" />
-                    下载视频 (.webm)
+                    标注版 (.webm)
                   </button>
+                  {recordedRawBlob && (
+                    <button
+                      onClick={() => {
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(recordedRawBlob);
+                        a.download = `抱石-原始版-${Date.now()}.webm`;
+                        a.click();
+                      }}
+                      className="flex-1 bg-emerald-900/50 hover:bg-emerald-900 border border-emerald-700/30 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
+                    >
+                      <Download className="w-4 h-4" />
+                      原始版 (.webm)
+                    </button>
+                  )}
                 </div>
               </div>
             )}

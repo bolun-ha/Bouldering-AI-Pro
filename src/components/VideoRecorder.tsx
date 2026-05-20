@@ -8,10 +8,16 @@ interface VideoRecorderProps {
   markers: Marker[];
   /** 是否正在录制 */
   active: boolean;
-  /** 录制完成回调（返回 webm blob） */
-  onRecordingComplete: (blob: Blob) => void;
+  /** 录制完成回调 */
+  onRecordingComplete: (result: {
+    annotatedBlob: Blob;
+    rawBlob?: Blob;
+    mode: 'annotated' | 'both';
+  }) => void;
   /** 每秒帧数（默认 15，平衡性能与流畅度） */
   fps?: number;
+  /** 是否同时录制原始无标注版本 */
+  recordRaw?: boolean;
 }
 
 /** 标记类型对应的颜色 */
@@ -32,10 +38,13 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
   active,
   onRecordingComplete,
   fps = 15,
+  recordRaw = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const rawRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const rawChunksRef = useRef<Blob[]>([]);
   const rafRef = useRef<number>(0);
   const markersRef = useRef<Marker[]>(markers);
   const isRecordingRef = useRef<boolean>(false);
@@ -141,6 +150,8 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
     if (active) {
       // 重置状态
       chunksRef.current = [];
+      rawChunksRef.current = [];
+      let rawBlobResult: Blob | undefined;
       isRecordingRef.current = true;
 
       // 匹配 video 尺寸
@@ -162,15 +173,18 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
         return;
       }
 
-      // 创建 canvas 流并录制
+      const getMimeType = () => {
+        if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus'))
+          return 'video/webm;codecs=vp9,opus';
+        if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'))
+          return 'video/webm;codecs=vp8,opus';
+        return 'video/webm';
+      };
+
+      // 标注版录制（canvas 合成流）
       try {
         const stream = canvas.captureStream(Math.min(fps, 30));
-        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-          ? 'video/webm;codecs=vp9,opus'
-          : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-            ? 'video/webm;codecs=vp8,opus'
-            : 'video/webm';
-
+        const mimeType = getMimeType();
         const mediaRecorder = new MediaRecorder(stream, { mimeType });
         mediaRecorderRef.current = mediaRecorder;
 
@@ -178,17 +192,28 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
           if (e.data.size > 0) chunksRef.current.push(e.data);
         };
 
-        mediaRecorder.onstop = () => {
-          isRecordingRef.current = false;
-          const blob = new Blob(chunksRef.current, { type: 'video/webm' });
-          console.log(`录制完成: ${(blob.size / 1024 / 1024).toFixed(1)}MB`);
-          onRecordingComplete(blob);
-        };
-
-        mediaRecorder.start(200); // 每 200ms 收集一次数据
+        mediaRecorder.start(200);
       } catch (err) {
-        console.error('启动录制失败:', err);
-        return;
+        console.error('启动标注版录制失败:', err);
+      }
+
+      // 原始无标注版录制（直接从 video 元素捕获）
+      if (recordRaw && video.captureStream) {
+        try {
+          const rawStream = video.captureStream();
+          const mimeType = getMimeType();
+          const rawRecorder = new MediaRecorder(rawStream, { mimeType });
+          rawRecorderRef.current = rawRecorder;
+
+          rawRecorder.ondataavailable = (e: BlobEvent) => {
+            if (e.data.size > 0) rawChunksRef.current.push(e.data);
+          };
+
+          rawRecorder.start(200);
+        } catch (err) {
+          console.error('启动原始版录制失败:', err);
+          rawRecorderRef.current = null;
+        }
       }
 
       // 开始绘制循环
@@ -198,14 +223,56 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
     return () => {
       // 清理：停止绘制循环 + 停止录制
       cancelAnimationFrame(rafRef.current);
-      if (
-        mediaRecorderRef.current &&
-        mediaRecorderRef.current.state !== 'inactive'
-      ) {
+
+      let annotatedDone = false;
+      let rawDone = !recordRaw;
+      rawBlobResult = undefined;
+
+      const tryComplete = () => {
+        if (!annotatedDone || !rawDone) return;
+        isRecordingRef.current = false;
+        const annotatedBlob = new Blob(chunksRef.current, { type: 'video/webm' });
+        console.log(`录制完成: 标注版 ${(annotatedBlob.size / 1024 / 1024).toFixed(1)}MB${rawBlobResult ? `, 原始版 ${(rawBlobResult.size / 1024 / 1024).toFixed(1)}MB` : ''}`);
+        onRecordingComplete({
+          annotatedBlob,
+          rawBlob: rawBlobResult,
+          mode: recordRaw ? 'both' : 'annotated',
+        });
+      };
+
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.onstop = () => {
+          annotatedDone = true;
+          tryComplete();
+        };
         mediaRecorderRef.current.stop();
+      } else {
+        annotatedDone = true;
+      }
+
+      if (rawRecorderRef.current && rawRecorderRef.current.state !== 'inactive') {
+        rawRecorderRef.current.onstop = () => {
+          rawBlobResult = new Blob(rawChunksRef.current, { type: 'video/webm' });
+          rawDone = true;
+          tryComplete();
+        };
+        rawRecorderRef.current.stop();
+      } else {
+        rawDone = true;
+      }
+
+      // 如果没有异步 recorder 需要等待，立即触发
+      if (annotatedDone && rawDone) {
+        isRecordingRef.current = false;
+        const annotatedBlob = new Blob(chunksRef.current, { type: 'video/webm' });
+        onRecordingComplete({
+          annotatedBlob,
+          rawBlob: rawBlobResult,
+          mode: recordRaw ? 'both' : 'annotated',
+        });
       }
     };
-  }, [active, video, fps, drawFrame, onRecordingComplete]);
+  }, [active, video, fps, drawFrame, onRecordingComplete, recordRaw]);
 
   return (
     <canvas
