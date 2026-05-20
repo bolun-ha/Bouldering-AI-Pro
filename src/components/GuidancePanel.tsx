@@ -87,57 +87,48 @@ export const GuidancePanel: React.FC<GuidancePanelProps> = ({ result, isAnalyzin
 
         ws.onopen = () => {
           console.log('Realtime WS connected');
-          // Session config must be sent first; server processes WS messages in order
-          ws.send(JSON.stringify({
-            event_id: nextEventId(),
-            type: 'session.update',
-            session: {
-              modalities: ['audio'],
-              voice: 'tongtong',
-              output_audio_format: 'mp3',
-              turn_detection: null,
-            },
-          }));
-          // Send instruction after session config
-          ws.send(JSON.stringify({
-            event_id: nextEventId(),
-            type: 'conversation.item.create',
-            item: {
-              type: 'message',
-              role: 'user',
-              content: [{ type: 'input_text', text }],
-            },
-          }));
-          // Trigger response
-          ws.send(JSON.stringify({
-            event_id: nextEventId(),
-            type: 'response.create',
-            response: {
-              modalities: ['audio'],
-            },
-          }));
         };
 
         ws.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
-            // console.log('WS msg:', msg.type);
+            console.log('WS msg:', msg.type, msg);
 
             switch (msg.type) {
               case 'session.created':
-                console.log('WS session.created');
+                // Send session config
+                ws.send(JSON.stringify({
+                  event_id: nextEventId(),
+                  type: 'session.update',
+                  session: {
+                    model: 'glm-realtime-flash',
+                    modalities: ['audio'],
+                    voice: 'tongtong',
+                    output_audio_format: 'mp3',
+                    turn_detection: null,
+                  },
+                }));
                 break;
 
               case 'session.updated':
-                console.log('WS session.updated');
-                break;
-
-              case 'conversation.item.created':
-                console.log('WS item created');
-                break;
-
-              case 'response.created':
-                console.log('WS response.created');
+                // Session ready — send text instruction
+                ws.send(JSON.stringify({
+                  event_id: nextEventId(),
+                  type: 'conversation.item.create',
+                  item: {
+                    type: 'message',
+                    role: 'user',
+                    content: [{ type: 'input_text', text }],
+                  },
+                }));
+                // Trigger response
+                ws.send(JSON.stringify({
+                  event_id: nextEventId(),
+                  type: 'response.create',
+                  response: {
+                    modalities: ['audio'],
+                  },
+                }));
                 break;
 
               case 'response.audio.delta':
