@@ -99,37 +99,33 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
     return '.webm';
   };
 
-  const downloadVideo = () => {
-    if (!recordedVideo || !videoUrlRef.current) return;
-    const a = document.createElement('a');
-    a.href = videoUrlRef.current;
-    a.download = `攀爬记录-${new Date(data.startTime).toLocaleDateString()}${getFileExt(recordedVideo)}`;
-    a.click();
-  };
-
   const shareVideo = async (blob: Blob, filename: string) => {
     if (!navigator.share) {
       // 不支持 Native Share → 降级为下载
+      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
+      a.href = url;
       a.download = filename;
       a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
       return;
     }
     try {
+      // blob.slice() 创建新 Blob 引用，避免 iOS 第二次分享失败
+      const file = new File([blob.slice()], filename, { type: blob.type });
       await navigator.share({
         title: '抱石攀爬记录',
         text: '我的抱石训练记录',
-        files: [new File([blob], filename, { type: blob.type })],
+        files: [file],
       });
-    } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        // 用户取消分享不报错
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = filename;
-        a.click();
-      }
+    } catch {
+      // 任何错误（用户取消 / iOS 一次最大分享限制 / 格式不支持）→ 下载
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
     }
   };
 
