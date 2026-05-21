@@ -146,11 +146,12 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
     const canvas = canvasRef.current;
     if (!canvas || !video) return;
 
+    let rawBlobResult: Blob | undefined;
+
     if (active) {
       // 重置状态
       chunksRef.current = [];
       rawChunksRef.current = [];
-      let rawBlobResult: Blob | undefined;
       isRecordingRef.current = true;
 
       // 匹配 video 尺寸
