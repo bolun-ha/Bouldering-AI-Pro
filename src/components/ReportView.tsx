@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { generateHtmlReport } from '../utils/generateHtmlReport';
 import { smartFilterSnapshots } from '../utils/smartFilterSnapshots';
+import { webmToMp4, needsTranscode } from '../utils/transcode';
 
 interface ReportViewProps {
   data: SessionData;
@@ -23,6 +24,9 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
   const [report, setReport] = useState<ReportData | null>(null);
   const [reportLoading, setReportLoading] = useState(true);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [transcoding, setTranscoding] = useState(false);
+  const [transcodePct, setTranscodePct] = useState(0);
+  const [transcodePhase, setTranscodePhase] = useState<'engine' | 'transcoding' | ''>('');
 
   // 录制视频 URL（用 ref 避免重复创建导致对象泄漏）
   const videoUrlRef = useRef<string | null>(null);
@@ -91,17 +95,30 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
     }
   };
 
-  const getFileExt = (blob: Blob | null): string => {
-    if (!blob) return '.webm';
-    const t = blob.type;
-    if (t.startsWith('video/mp4')) return '.mp4';
-    if (t.startsWith('video/webm')) return '.webm';
-    return '.webm';
-  };
+  const shareVideo = async (blob: Blob, label: string) => {
+    // 如果是 WebM → 先转成 MP4 再分享
+    if (needsTranscode(blob)) {
+      setTranscoding(true);
+      setTranscodePhase('engine');
+      setTranscodePct(0);
 
-  const shareVideo = async (blob: Blob, filename: string) => {
+      try {
+        blob = await webmToMp4(
+          blob,
+          (pct) => { setTranscodePct(pct); setTranscodePhase('transcoding'); },
+          () => setTranscodePhase('engine'),
+        );
+      } catch (err) {
+        console.error('[ReportView] 转码失败，使用原始格式:', err);
+        setTranscoding(false);
+        // 转码失败，用原始 blob 继续
+      }
+      setTranscoding(false);
+    }
+
+    const filename = `攀爬-${label}-${Date.now()}${blob.type.startsWith('video/mp4') ? '.mp4' : '.webm'}`;
+
     if (!navigator.share) {
-      // 不支持 Native Share → 降级为下载
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -110,8 +127,8 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
       setTimeout(() => URL.revokeObjectURL(url), 5000);
       return;
     }
+
     try {
-      // blob.slice() 创建新 Blob 引用，避免 iOS 第二次分享失败
       const file = new File([blob.slice()], filename, { type: blob.type });
       await navigator.share({
         title: '抱石攀爬记录',
@@ -119,7 +136,6 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
         files: [file],
       });
     } catch {
-      // 任何错误（用户取消 / iOS 一次最大分享限制 / 格式不支持）→ 下载
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -222,7 +238,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
 
             {/* Video Playback Tab */}
             {activeTab === 'video' && (
-              <div className="bg-slate-900 border border-slate-800 rounded-[40px] overflow-hidden">
+              <div className="relative bg-slate-900 border border-slate-800 rounded-[40px] overflow-hidden">
                 <div className="relative bg-black aspect-video">
                   <video
                     ref={videoRef}
@@ -256,22 +272,46 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
                 </div>
                 <div className="p-4 flex flex-col gap-3">
                   <button
-                    onClick={() => shareVideo(recordedVideo!, `攀爬-标注版-${Date.now()}${getFileExt(recordedVideo)}`)}
+                    onClick={() => shareVideo(recordedVideo!, '标注版')}
                     className="w-full bg-blue-800/50 hover:bg-blue-800 border border-blue-700/30 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
                   >
                     <Download className="w-4 h-4" />
-                    保存标注版{getFileExt(recordedVideo)}到相册
+                    标注版 MP4 → 保存到相册
                   </button>
                   {recordedRawBlob && (
                     <button
-                      onClick={() => shareVideo(recordedRawBlob!, `攀爬-原始版-${Date.now()}${getFileExt(recordedRawBlob)}`)}
+                      onClick={() => shareVideo(recordedRawBlob!, '原始版')}
                       className="w-full bg-blue-800/50 hover:bg-blue-800 border border-blue-700/30 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
                     >
                       <Download className="w-4 h-4" />
-                      保存原始版{getFileExt(recordedRawBlob)}到相册
+                      原始版 MP4 → 保存到相册
                     </button>
                   )}
                 </div>
+
+                {/* 转码进度遮罩 */}
+                {transcoding && (
+                  <div className="absolute inset-0 z-10 bg-slate-950/90 backdrop-blur-sm flex flex-col items-center justify-center rounded-[40px] overflow-hidden">
+                    <Loader2 className="w-8 h-8 text-orange-500 animate-spin mb-4" />
+                    <p className="text-sm font-bold text-slate-200 mb-1">
+                      {transcodePhase === 'engine'
+                        ? '正在加载转码引擎…（首次约 10 秒）'
+                        : '正在转换格式 WebM → MP4…'}
+                    </p>
+                    <p className="text-xs text-slate-400 mb-3">
+                      转换后可直接保存到手机相册
+                    </p>
+                    <div className="w-48 h-2 bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-orange-500 rounded-full transition-all duration-300"
+                        style={{ width: `${transcodePct}%` }}
+                      />
+                    </div>
+                    <p className="text-[10px] font-mono text-slate-500 mt-2">
+                      {transcodePct}%
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
