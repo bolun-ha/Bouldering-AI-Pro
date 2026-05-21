@@ -60,8 +60,8 @@ export default function App() {
         if (!prev) return prev;
         return { ...prev, endTime: Date.now() };
       });
-      // 延迟显示报告，等 MediaRecorder 完成 final flush
-      setTimeout(() => setShowReport(true), 500);
+      // 立即显示报告，不延迟
+      setShowReport(true);
     }
   };
 
@@ -316,15 +316,9 @@ export default function App() {
         )}
       </main>
 
-      {/* Camera Mode: Floating Controls Overlay (Visible only when not recording) */}
-      <AnimatePresence>
-        {mode === 'camera' && !isRecording && !showReport && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            className="absolute bottom-12 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-4 w-full px-8 max-w-sm"
-          >
+      {/* Camera Mode: Floating Controls Overlay — 纯条件渲染，去动画避免冲突 */}
+      {mode === 'camera' && !isRecording && !showReport && (
+        <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-4 w-full px-8 max-w-sm">
             <button
               onClick={startClimb}
               className="w-full bg-white text-slate-950 h-16 rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-transform shadow-2xl"
@@ -340,9 +334,8 @@ export default function App() {
                   <Settings className="w-5 h-5" />
                </button>
             </div>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
 
       {/* Camera Mode: Recording HUD */}
       {mode === 'camera' && isRecording && (
