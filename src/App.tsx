@@ -401,7 +401,11 @@ export default function App() {
                 {difficultyCategory && difficultyGrade && (
                   <>
                     <button
-                      onClick={() => { setShowDifficultyPicker(false); startClimb(); }}
+                      onClick={() => {
+                        setShowDifficultyPicker(false);
+                        // 延迟一帧再 start，确保 React 完成 state 合并
+                        requestAnimationFrame(() => requestAnimationFrame(() => startClimb()));
+                      }}
                       className="w-full bg-orange-600 text-white h-12 rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-lg"
                     >
                       <Play className="w-5 h-5 fill-current" />

@@ -56,6 +56,8 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    try {
+
     // 1. 绘制视频帧
     if (video && video.readyState >= 2) {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -135,6 +137,7 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
     ctx.fillText('AI 抱石教练 · 专业版', 16, 16);
 
     // 4. 继续下一帧
+    } catch (_) { /* draw 失败不影响录制 */ }
     rafRef.current = requestAnimationFrame(drawFrame);
   }, [video]);
 

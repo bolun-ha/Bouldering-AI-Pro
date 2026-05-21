@@ -20,7 +20,7 @@ export function generateHtmlReport(
 
   // 构建关键帧 HTML
   const snapshotsHtml = filtered
-    .map(({ entry, origIdx }) => {
+    .map(({ entry, origIdx }, idx) => {
       if (!entry.snapshot) return '';
       const timeEstimate = Math.floor(origIdx * 1.8);
       const statusMap: Record<string, string> = {
@@ -32,7 +32,7 @@ export function generateHtmlReport(
       };
       return `
         <div class="snapshot-card">
-          <img src="${entry.snapshot}" alt="关键帧 ${i + 1}" loading="lazy" />
+          <img src="${entry.snapshot}" alt="关键帧 ${idx + 1}" loading="lazy" />
           <div class="snapshot-meta">
             <span class="snapshot-num">#${(origIdx + 1).toString().padStart(2, '0')}</span>
             <span>${timeEstimate}s</span>
