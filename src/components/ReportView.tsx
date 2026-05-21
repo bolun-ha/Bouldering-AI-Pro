@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { SessionData, ReportData } from '../types';
 import {
   Trophy, Clock, Target, AlertTriangle, Loader2,
-  ChevronRight, Share2, Play, Download, Camera, Video, Pause, Sparkles, TrendingUp, Lightbulb, ListChecks, FileText
+  ChevronRight, Play, Download, Camera, Video, Pause, Sparkles, TrendingUp, Lightbulb, ListChecks, FileText
 } from 'lucide-react';
 import { generateHtmlReport } from '../utils/generateHtmlReport';
 import { smartFilterSnapshots } from '../utils/smartFilterSnapshots';
@@ -259,44 +259,21 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
                   </div>
                 </div>
                 <div className="p-4 flex flex-col gap-3">
-                  <div className="flex gap-3">
+                  <button
+                    onClick={() => shareVideo(recordedVideo!, `攀爬-标注版-${Date.now()}${getFileExt(recordedVideo)}`)}
+                    className="w-full bg-blue-800/50 hover:bg-blue-800 border border-blue-700/30 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    保存标注版{getFileExt(recordedVideo)}到相册
+                  </button>
+                  {recordedRawBlob && (
                     <button
-                      onClick={downloadVideo}
-                      className="flex-1 bg-slate-800 hover:bg-slate-700 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
+                      onClick={() => shareVideo(recordedRawBlob!, `攀爬-原始版-${Date.now()}${getFileExt(recordedRawBlob)}`)}
+                      className="w-full bg-blue-800/50 hover:bg-blue-800 border border-blue-700/30 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
                     >
                       <Download className="w-4 h-4" />
-                      导出标注版{getFileExt(recordedVideo)}
+                      保存原始版{getFileExt(recordedRawBlob)}到相册
                     </button>
-                    <button
-                      onClick={() => shareVideo(recordedVideo!, `攀爬-标注版-${Date.now()}${getFileExt(recordedVideo)}`)}
-                      className="flex-1 bg-blue-800/50 hover:bg-blue-800 border border-blue-700/30 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
-                    >
-                      <Share2 className="w-4 h-4" />
-                      保存到相册
-                    </button>
-                  </div>
-                  {recordedRawBlob && (
-                    <div className="flex gap-3">
-                      <button
-                        onClick={() => {
-                          const a = document.createElement('a');
-                          a.href = URL.createObjectURL(recordedRawBlob);
-                          a.download = `抱石-原始版-${Date.now()}${getFileExt(recordedRawBlob)}`;
-                          a.click();
-                        }}
-                        className="flex-1 bg-emerald-900/50 hover:bg-emerald-900 border border-emerald-700/30 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
-                      >
-                        <Download className="w-4 h-4" />
-                        导出原始版{getFileExt(recordedRawBlob)}
-                      </button>
-                      <button
-                        onClick={() => shareVideo(recordedRawBlob!, `攀爬-原始版-${Date.now()}${getFileExt(recordedRawBlob)}`)}
-                        className="flex-1 bg-emerald-800/50 hover:bg-emerald-800 border border-emerald-700/30 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
-                      >
-                        <Share2 className="w-4 h-4" />
-                        保存到相册
-                      </button>
-                    </div>
                   )}
                 </div>
               </div>

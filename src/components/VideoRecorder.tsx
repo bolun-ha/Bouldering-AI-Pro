@@ -175,11 +175,12 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
 
       const getMimeType = () => {
         // iOS Safari: 首选 MP4（手机可直接播放/保存到相册）
-        if (MediaRecorder.isTypeSupported('video/mp4;codecs=h264,aac'))
-          return 'video/mp4;codecs=h264,aac';
+        // 注意：codec 格式使用 RFC 6381（如 avc1.42E01E 而非 h264）
+        if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1.42E01E,mp4a.40.2'))
+          return 'video/mp4;codecs=avc1.42E01E,mp4a.40.2';
         if (MediaRecorder.isTypeSupported('video/mp4'))
           return 'video/mp4';
-        // Chrome/Android: 次选 H.264 in WebM（部分设备可播放）
+        // Chrome/Android: 次选 H.264 in WebM
         if (MediaRecorder.isTypeSupported('video/webm;codecs=h264,opus'))
           return 'video/webm;codecs=h264,opus';
         // 兜底 VP9 / VP8
