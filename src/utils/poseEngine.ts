@@ -106,8 +106,7 @@ export async function initHandEngine(): Promise<void> {
       );
       handLandmarker = await HandLandmarker.createFromOptions(vision, {
         baseOptions: {
-          modelAssetPath:
-            'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker_lite/float16/1/hand_landmarker_lite.task',
+          modelAssetPath: '/hand_landmarker.task', // 本地托管，不受 CDN 封锁影响
           delegate: 'GPU',
         },
         runningMode: 'VIDEO',
