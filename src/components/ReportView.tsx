@@ -39,10 +39,15 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
   }
 
   // ─── AI 报告生成 ─────────────────────────────────────────────
+  const fetchInFlight = useRef(false);
   useEffect(() => {
+    if (fetchInFlight.current) return; // 已在请求中，不重复发
+
     let cancelled = false;
+    const abortController = new AbortController();
 
     async function fetchReport() {
+      fetchInFlight.current = true;
       setReportLoading(true);
       setReportError(null);
       try {
@@ -61,6 +66,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
         const response = await fetch('/api/report', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: abortController.signal,
           body: JSON.stringify({
             history: historyData,
             totalErrors: data.totalErrors,
@@ -74,14 +80,21 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
         const result: ReportData = await response.json();
         if (!cancelled) setReport(result);
       } catch (err: any) {
+        if (err.name === 'AbortError') return; // 忽略取消
         if (!cancelled) setReportError(err.message || '生成报告失败');
       } finally {
-        if (!cancelled) setReportLoading(false);
+        if (!cancelled) {
+          setReportLoading(false);
+          fetchInFlight.current = false;
+        }
       }
     }
 
     fetchReport();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      abortController.abort();
+    };
   }, [data, duration]);
 
   const togglePlay = () => {
