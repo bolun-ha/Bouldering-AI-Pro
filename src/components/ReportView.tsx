@@ -91,12 +91,46 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
     }
   };
 
+  const getFileExt = (blob: Blob | null): string => {
+    if (!blob) return '.webm';
+    const t = blob.type;
+    if (t.startsWith('video/mp4')) return '.mp4';
+    if (t.startsWith('video/webm')) return '.webm';
+    return '.webm';
+  };
+
   const downloadVideo = () => {
     if (!recordedVideo || !videoUrlRef.current) return;
     const a = document.createElement('a');
     a.href = videoUrlRef.current;
-    a.download = `攀爬记录-${new Date(data.startTime).toLocaleDateString()}.webm`;
+    a.download = `攀爬记录-${new Date(data.startTime).toLocaleDateString()}${getFileExt(recordedVideo)}`;
     a.click();
+  };
+
+  const shareVideo = async (blob: Blob, filename: string) => {
+    if (!navigator.share) {
+      // 不支持 Native Share → 降级为下载
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      return;
+    }
+    try {
+      await navigator.share({
+        title: '抱石攀爬记录',
+        text: '我的抱石训练记录',
+        files: [new File([blob], filename, { type: blob.type })],
+      });
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        // 用户取消分享不报错
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+      }
+    }
   };
 
   const downloadSnapshot = (snapshot: string, index: number) => {
@@ -224,27 +258,45 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
                     {duration}秒
                   </div>
                 </div>
-                <div className="p-4 flex gap-3">
-                  <button
-                    onClick={downloadVideo}
-                    className="flex-1 bg-slate-800 hover:bg-slate-700 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
-                  >
-                    <Download className="w-4 h-4" />
-                    标注版 (.webm)
-                  </button>
-                  {recordedRawBlob && (
+                <div className="p-4 flex flex-col gap-3">
+                  <div className="flex gap-3">
                     <button
-                      onClick={() => {
-                        const a = document.createElement('a');
-                        a.href = URL.createObjectURL(recordedRawBlob);
-                        a.download = `抱石-原始版-${Date.now()}.webm`;
-                        a.click();
-                      }}
-                      className="flex-1 bg-emerald-900/50 hover:bg-emerald-900 border border-emerald-700/30 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
+                      onClick={downloadVideo}
+                      className="flex-1 bg-slate-800 hover:bg-slate-700 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
                     >
                       <Download className="w-4 h-4" />
-                      原始版 (.webm)
+                      导出标注版{getFileExt(recordedVideo)}
                     </button>
+                    <button
+                      onClick={() => shareVideo(recordedVideo!, `攀爬-标注版-${Date.now()}${getFileExt(recordedVideo)}`)}
+                      className="flex-1 bg-blue-800/50 hover:bg-blue-800 border border-blue-700/30 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      保存到相册
+                    </button>
+                  </div>
+                  {recordedRawBlob && (
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => {
+                          const a = document.createElement('a');
+                          a.href = URL.createObjectURL(recordedRawBlob);
+                          a.download = `抱石-原始版-${Date.now()}${getFileExt(recordedRawBlob)}`;
+                          a.click();
+                        }}
+                        className="flex-1 bg-emerald-900/50 hover:bg-emerald-900 border border-emerald-700/30 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
+                      >
+                        <Download className="w-4 h-4" />
+                        导出原始版{getFileExt(recordedRawBlob)}
+                      </button>
+                      <button
+                        onClick={() => shareVideo(recordedRawBlob!, `攀爬-原始版-${Date.now()}${getFileExt(recordedRawBlob)}`)}
+                        className="flex-1 bg-emerald-800/50 hover:bg-emerald-800 border border-emerald-700/30 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold transition-colors"
+                      >
+                        <Share2 className="w-4 h-4" />
+                        保存到相册
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
