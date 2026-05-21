@@ -117,7 +117,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
   }, [recordedVideo]);
 
   return (
-    <div className="fixed inset-0 bg-slate-950 z-50 overflow-y-auto px-6 py-12 text-slate-200 font-sans">
+    <div className="fixed inset-0 z-50 overflow-y-auto px-6 py-12 text-slate-200 font-sans" style={{ backgroundColor: '#ff4444' }}>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
