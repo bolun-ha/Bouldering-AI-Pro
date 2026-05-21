@@ -21,19 +21,7 @@ export default function App() {
   const [recordedVideoBlob, setRecordedVideoBlob] = useState<Blob | null>(null);
   const [recordedRawBlob, setRecordedRawBlob] = useState<Blob | null>(null);
   const [mode, setMode] = useState<'camera' | 'video'>('camera');
-  const [difficultyCategory, setDifficultyCategory] = useState<'simple' | 'medium' | 'hard' | null>(null);
-  const [difficultyGrade, setDifficultyGrade] = useState<string | null>(null);
-  const [showDifficultyPicker, setShowDifficultyPicker] = useState(false);
-  const [pendingStart, setPendingStart] = useState(false);
   const cooldownRef = useRef(false);
-
-  // 延迟触发 startClimb（确保前一个 state 更新已完成）
-  useEffect(() => {
-    if (pendingStart) {
-      setPendingStart(false);
-      startClimb();
-    }
-  }, [pendingStart]);
 
   // Video 元素引用（传给 VideoRecorder 做合成录制）
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
@@ -55,16 +43,11 @@ export default function App() {
   }, []);
 
   const startClimb = () => {
-    if (!difficultyCategory || !difficultyGrade) {
-      setShowDifficultyPicker(true);
-      return;
-    }
     setRecordedVideoBlob(null);
     setSession({
       startTime: Date.now(),
       totalErrors: 0,
-      history: [],
-      difficulty: { category: difficultyCategory, grade: difficultyGrade },
+      history: []
     });
     setIsRecording(true);
     setCurrentResult(null);
@@ -342,108 +325,21 @@ export default function App() {
             exit={{ opacity: 0, y: 20 }}
             className="absolute bottom-12 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-4 w-full px-8 max-w-sm"
           >
-            {showDifficultyPicker ? (
-              /* ── 难度选择器 ───────────────────────────── */
-              <div className="w-full bg-slate-900/95 backdrop-blur-xl rounded-3xl p-5 border border-slate-800 shadow-2xl">
-                <div className="text-center mb-4">
-                  <div className="text-xs font-bold text-orange-500 uppercase tracking-widest mb-1">
-                    {difficultyCategory ? '选择具体难度' : '选择线路难度'}
-                  </div>
-                  <div className="text-[10px] text-slate-500">
-                    {difficultyGrade
-                      ? `已选：${difficultyGrade}`
-                      : difficultyCategory
-                        ? `类别：${difficultyCategory === 'simple' ? '简单 V0-V2' : difficultyCategory === 'medium' ? '中等 V3-V5' : '难 V6-V8+'}`
-                        : '先选类别，再选具体难度'}
-                  </div>
-                </div>
-
-                {/* 第一步：选类别 */}
-                {!difficultyCategory && (
-                  <div className="flex gap-2 mb-3">
-                    {[
-                      { key: 'simple' as const, label: '简单', sub: 'V0-V2', color: 'bg-emerald-600' },
-                      { key: 'medium' as const, label: '中等', sub: 'V3-V5', color: 'bg-amber-600' },
-                      { key: 'hard' as const, label: '难', sub: 'V6-V8+', color: 'bg-red-600' },
-                    ].map((cat) => (
-                      <button
-                        key={cat.key}
-                        onClick={() => setDifficultyCategory(cat.key)}
-                        className={`flex-1 ${cat.color} rounded-xl py-3 flex flex-col items-center active:scale-95 transition-transform`}
-                      >
-                        <span className="text-sm font-bold text-white">{cat.label}</span>
-                        <span className="text-[9px] text-white/70 mt-0.5">{cat.sub}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* 第二步：选具体等级 */}
-                {difficultyCategory && !difficultyGrade && (
-                  <div>
-                    <div className="grid grid-cols-3 gap-2 mb-3">
-                      {(difficultyCategory === 'simple'
-                        ? ['V0', 'V1', 'V2']
-                        : difficultyCategory === 'medium'
-                          ? ['V3', 'V4', 'V5']
-                          : ['V6', 'V7', 'V8+']
-                      ).map((g) => (
-                        <button
-                          key={g}
-                          onClick={() => setDifficultyGrade(g)}
-                          className="bg-slate-800 border border-slate-700 rounded-xl py-3 text-sm font-bold text-slate-200 active:scale-95 transition-transform"
-                        >
-                          {g}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      onClick={() => { setDifficultyCategory(null); }}
-                      className="w-full text-[10px] text-slate-500 py-1"
-                    >
-                      返回重新选类别
-                    </button>
-                  </div>
-                )}
-
-                {/* 已选完 */}
-                {difficultyCategory && difficultyGrade && (
-                  <>
-                    <button
-                      onClick={() => { setShowDifficultyPicker(false); setPendingStart(true); }}
-                      className="w-full bg-orange-600 text-white h-12 rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-lg"
-                    >
-                      <Play className="w-5 h-5 fill-current" />
-                      <span className="font-black tracking-wider text-sm">{difficultyGrade} · 开始攀爬</span>
-                    </button>
-                    <button
-                      onClick={() => { setDifficultyGrade(null); }}
-                      className="w-full text-[10px] text-slate-500 py-1 mt-1"
-                    >
-                      重选难度
-                    </button>
-                  </>
-                )}
-              </div>
-            ) : (
-              <>
-                <button
-                  onClick={startClimb}
-                  className="w-full bg-white text-slate-950 h-16 rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-transform shadow-2xl"
-                >
-                  <Play className="w-6 h-6 fill-current" />
-                  <span className="font-black uppercase tracking-widest text-lg italic">开始攀爬</span>
-                </button>
-                <div className="flex gap-4 w-full">
-                  <button className="flex-1 bg-slate-900 border border-slate-800 h-14 rounded-2xl flex items-center justify-center text-slate-400 active:scale-95 transition-transform">
-                    <History className="w-5 h-5" />
-                  </button>
-                  <button className="flex-1 bg-slate-900 border border-slate-800 h-14 rounded-2xl flex items-center justify-center text-slate-400 active:scale-95 transition-transform">
-                    <Settings className="w-5 h-5" />
-                  </button>
-                </div>
-              </>
-            )}
+            <button
+              onClick={startClimb}
+              className="w-full bg-white text-slate-950 h-16 rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-transform shadow-2xl"
+            >
+              <Play className="w-6 h-6 fill-current" />
+              <span className="font-black uppercase tracking-widest text-lg italic">开始攀爬</span>
+            </button>
+            <div className="flex gap-4 w-full">
+               <button className="flex-1 bg-slate-900 border border-slate-800 h-14 rounded-2xl flex items-center justify-center text-slate-400 active:scale-95 transition-transform">
+                  <History className="w-5 h-5" />
+               </button>
+               <button className="flex-1 bg-slate-900 border border-slate-800 h-14 rounded-2xl flex items-center justify-center text-slate-400 active:scale-95 transition-transform">
+                  <Settings className="w-5 h-5" />
+               </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
