@@ -268,7 +268,7 @@ export const ReportView: React.FC<ReportViewProps> = ({ data, recordedVideo, rec
                   </p>
                 ) : (
                   <div className="grid grid-cols-2 gap-3">
-                    {smartFilterSnapshots(data.history).map(({ entry, origIdx }) => (
+                    {smartFilterSnapshots(data.history).map(({ entry, origIdx }, idx) => (
                       <div
                         key={origIdx}
                         className="relative group rounded-2xl overflow-hidden bg-slate-900"
