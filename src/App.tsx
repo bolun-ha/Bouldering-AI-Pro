@@ -222,7 +222,7 @@ export default function App() {
       {/* Mobile-First Header */}
       <header className="absolute top-0 inset-x-0 h-16 bg-gradient-to-b from-slate-950/80 to-transparent flex items-center justify-between px-6 z-40 backdrop-blur-sm">
         <div className="flex items-center gap-3">
-          <button onClick={() => setShowQR(true)} className="w-8 h-8 bg-orange-600 rounded-lg flex items-center justify-center text-white font-black italic shadow-lg shadow-orange-600/20 hover:bg-orange-500 active:scale-90 transition-all">B</button>
+          <button id="b-logo" onClick={() => setShowQR(true)} className="w-8 h-8 bg-orange-600 rounded-lg flex items-center justify-center text-white font-black italic shadow-lg shadow-orange-600/20 hover:bg-orange-500 active:scale-90 transition-all">B</button>
           <h1 className="text-sm font-black tracking-tighter text-white uppercase italic">抱石 AI <span className="text-orange-500">专业版</span></h1>
         </div>
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import QRCode from 'qrcode';
 import { X } from 'lucide-react';
@@ -13,6 +13,9 @@ interface QRPopoverProps {
 
 export function QRPopover({ isOpen, onClose, xiaohongshuQR }: QRPopoverProps) {
   const [siteQR, setSiteQR] = useState('');
+  const [linePath, setLinePath] = useState('');
+  const cardRef = useRef<HTMLDivElement>(null);
+  const lineRendered = useRef(false);
 
   useEffect(() => {
     QRCode.toDataURL(SITE_URL, {
@@ -21,6 +24,37 @@ export function QRPopover({ isOpen, onClose, xiaohongshuQR }: QRPopoverProps) {
       color: { dark: '#1e293b', light: '#ffffff' },
     }).then(url => setSiteQR(url));
   }, []);
+
+  // 计算 L 形连接线的路径
+  useEffect(() => {
+    if (!isOpen) {
+      setLinePath('');
+      lineRendered.current = false;
+      return;
+    }
+
+    const t = setTimeout(() => {
+      const logo = document.getElementById('b-logo');
+      const card = cardRef.current;
+      if (!logo || !card) return;
+
+      const lr = logo.getBoundingClientRect();
+      const cr = card.getBoundingClientRect();
+
+      // 起点：logo 右下角
+      const sx = lr.right;
+      const sy = lr.bottom;
+      // 终点：弹窗左侧中间
+      const ex = cr.left;
+      const ey = cr.top + cr.height / 2;
+
+      // L 形：先垂直向下，再水平向右
+      setLinePath(`M ${sx} ${sy} L ${sx} ${ey} L ${ex} ${ey}`);
+      lineRendered.current = true;
+    }, 120); // 等弹窗动画安顿后再测量
+
+    return () => clearTimeout(t);
+  }, [isOpen]);
 
   return (
     <AnimatePresence>
@@ -36,8 +70,29 @@ export function QRPopover({ isOpen, onClose, xiaohongshuQR }: QRPopoverProps) {
             if (e.target === e.currentTarget) onClose();
           }}
         >
+          {/* L 形连接线 */}
+          {linePath && (
+            <svg
+              className="fixed inset-0 w-full h-full pointer-events-none z-[101]"
+              style={{ overflow: 'visible' }}
+            >
+              <motion.path
+                d={linePath}
+                fill="none"
+                stroke="rgba(148,163,184,0.35)"
+                strokeWidth="2"
+                strokeDasharray="6 4"
+                initial={{ pathLength: 0 }}
+                animate={{ pathLength: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.5, ease: 'easeOut' }}
+              />
+            </svg>
+          )}
+
           <motion.div
             key="qr-card"
+            ref={cardRef}
             initial={{ opacity: 0, scale: 0.85, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.3, y: 60 }}
