@@ -221,7 +221,7 @@ export function VideoAnalysis() {
       canvas.height = 720;
       ctx.drawImage(video, 0, 0, 1280, 720);
 
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.98);
       frameCounterRef.current++;
       const frameNum = frameCounterRef.current;
 

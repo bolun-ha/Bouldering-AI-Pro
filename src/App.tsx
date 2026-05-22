@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CameraStream } from './components/CameraStream';
 import { Overlay } from './components/Overlay';
@@ -9,6 +9,7 @@ import { VideoAnalysis } from './components/VideoAnalysis';
 import { AnalysisResult, SessionData, HistoryEntry } from './types';
 import { Play, Square, ShieldCheck, Settings, History, Video, Camera } from 'lucide-react';
 import { drawMarkers } from './utils/drawMarkers';
+import { QRPopover } from './components/QRPopover';
 
 export default function App() {
   const [isRecording, setIsRecording] = useState(false);
@@ -21,6 +22,8 @@ export default function App() {
   const [recordedVideoBlob, setRecordedVideoBlob] = useState<Blob | null>(null);
   const [recordedRawBlob, setRecordedRawBlob] = useState<Blob | null>(null);
   const [mode, setMode] = useState<'camera' | 'video'>('camera');
+  const [showQR, setShowQR] = useState(false);
+  const qrShownRef = useRef(false);
   const cooldownRef = useRef(false);
 
   // Video 元素引用（传给 VideoRecorder 做合成录制）
@@ -53,6 +56,15 @@ export default function App() {
     setCurrentResult(null);
   };
 
+  // 首次访问自动弹出二维码
+  useEffect(() => {
+    if (!qrShownRef.current) {
+      qrShownRef.current = true;
+      const t = setTimeout(() => setShowQR(true), 2000);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
   const stopClimb = () => {
     setIsRecording(false);
     if (session) {
@@ -71,7 +83,7 @@ export default function App() {
     try {
       setIsAnalyzing(true);
       setAnalysisError(null);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.98);
 
       const body: any = { image: dataUrl };
       if (landmarksSnapshot) body.pose = landmarksSnapshot;
@@ -204,11 +216,13 @@ export default function App() {
   }, []);
 
   return (
-    <div className="relative h-screen w-screen bg-slate-950 font-sans text-slate-200 overflow-hidden flex flex-col">
+    <>
+      <QRPopover isOpen={showQR} onClose={() => setShowQR(false)} />
+      <div className="relative h-screen w-screen bg-slate-950 font-sans text-slate-200 overflow-hidden flex flex-col">
       {/* Mobile-First Header */}
       <header className="absolute top-0 inset-x-0 h-16 bg-gradient-to-b from-slate-950/80 to-transparent flex items-center justify-between px-6 z-40 backdrop-blur-sm">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-orange-600 rounded-lg flex items-center justify-center text-white font-black italic shadow-lg shadow-orange-600/20">B</div>
+          <button onClick={() => setShowQR(true)} className="w-8 h-8 bg-orange-600 rounded-lg flex items-center justify-center text-white font-black italic shadow-lg shadow-orange-600/20 hover:bg-orange-500 active:scale-90 transition-all">B</button>
           <h1 className="text-sm font-black tracking-tighter text-white uppercase italic">抱石 AI <span className="text-orange-500">专业版</span></h1>
         </div>
 
@@ -396,5 +410,6 @@ export default function App() {
         )}
       </AnimatePresence>
     </div>
+    </>
   );
 }
