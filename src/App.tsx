@@ -23,7 +23,6 @@ export default function App() {
   const [recordedRawBlob, setRecordedRawBlob] = useState<Blob | null>(null);
   const [mode, setMode] = useState<'camera' | 'video'>('camera');
   const [showQR, setShowQR] = useState(false);
-  const qrShownRef = useRef(false);
   const cooldownRef = useRef(false);
 
   // Video 元素引用（传给 VideoRecorder 做合成录制）
@@ -58,8 +57,9 @@ export default function App() {
 
   // 首次访问自动弹出二维码
   useEffect(() => {
-    if (!qrShownRef.current) {
-      qrShownRef.current = true;
+    const key = 'bouldering_qr_shown';
+    if (!localStorage.getItem(key)) {
+      localStorage.setItem(key, '1');
       const t = setTimeout(() => setShowQR(true), 2000);
       return () => clearTimeout(t);
     }
