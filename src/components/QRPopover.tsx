@@ -8,7 +8,7 @@ const SITE_URL = 'https://boulderi.netlify.app';
 interface QRPopoverProps {
   isOpen: boolean;
   onClose: () => void;
-  xiaohongshuQR?: string; // base64 data URL
+  xiaohongshuQR?: string;
 }
 
 export function QRPopover({ isOpen, onClose, xiaohongshuQR }: QRPopoverProps) {
@@ -81,11 +81,13 @@ export function QRPopover({ isOpen, onClose, xiaohongshuQR }: QRPopoverProps) {
                   <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-3">
                     小红书 · 关注获取更新
                   </p>
-                  <img
-                    src={xiaohongshuQR}
-                    alt="小红书二维码"
-                    className="w-44 h-44 mx-auto rounded-xl shadow-inner"
-                  />
+                  <div className="flex justify-center">
+                    <img
+                      src={xiaohongshuQR}
+                      alt="小红书二维码"
+                      className="max-w-[180px] max-h-[180px] rounded-xl shadow-inner object-contain"
+                    />
+                  </div>
                 </div>
               </>
             )}

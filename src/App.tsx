@@ -217,7 +217,7 @@ export default function App() {
 
   return (
     <>
-      <QRPopover isOpen={showQR} onClose={() => setShowQR(false)} />
+      <QRPopover isOpen={showQR} onClose={() => setShowQR(false)} xiaohongshuQR="/xiaohongshu-qr.png" />
       <div className="relative h-screen w-screen bg-slate-950 font-sans text-slate-200 overflow-hidden flex flex-col">
       {/* Mobile-First Header */}
       <header className="absolute top-0 inset-x-0 h-16 bg-gradient-to-b from-slate-950/80 to-transparent flex items-center justify-between px-6 z-40 backdrop-blur-sm">
