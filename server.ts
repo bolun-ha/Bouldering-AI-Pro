@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import crypto from "crypto";
+import { jsonrepair } from "jsonrepair";
 
 dotenv.config();
 
@@ -24,8 +25,20 @@ function zhipuHeaders() {
 }
 
 // ─── AI Bouldering Coach System Instruction ─────────────────────
-const SYSTEM_INSTRUCTION = `你是一位专业的抱石教练。
-你的任务是通过图片分析攀爬姿态，并提供详细的路线推演和动作建议。
+const SYSTEM_INSTRUCTION = `# Role
+你是一名国家级专业抱石攀岩教练兼比赛主裁判。请分析输入的攀岩图片，结合 MediaPipe 骨骼检测数据（如果提供），进行深度、连贯的复盘。
+
+# Core Philosophy
+攀岩是时序连贯的艺术，禁止孤立的单帧误判。
+
+## 终局裁判与顶端控制规范
+如果你判定用户已处于攀爬终局（即将摸到顶点或完成合分），按以下规则判定：
+
+[SUCCESS 完攀] 双手同时出现在墙体顶端终点（Top Hold）位置即判定完攀，不要求保持帧数，无需关注下墙姿态
+[FAIL 坠落] 未完成合分时身体失控位移、摔向垫子
+[UNKNOWN] 主动下墙，无摸顶也无坠落
+
+# 输出结构
 
 你输出的数据会用于两个用途：
 1. **实时指导**（instruction 字段）— 简短行动指令，语音播报给正在攀爬的用户
@@ -37,62 +50,49 @@ const SYSTEM_INSTRUCTION = `你是一位专业的抱石教练。
 简短直接的行动指令，不超过20个字，适配语音播报。
 - 优先给出抓握点指令，含方向+距离+形状+手脚
 - 如果姿态不稳，先给姿态纠正再给抓握建议
-- 示例："右上红色三点点，左手抓"、"正上方30cm大把手，右手上"、"重心偏左，向右贴壁"
 
-### detailed_feedback（事后动作纠正分析）【重点】
+### detailed_feedback（事后动作纠正分析）
 **字数限制：150 字以内**。需要具体描述这帧中攀爬者身体姿态的问题或优点：
 - 身体哪个部位有问题（膝盖/髋关节/肩膀/手腕/脚位/重心）
 - 具体什么问题（内扣/外翻/过直/过高/偏移/没踩实）
 - 建议怎么改（外旋髋关节/降低重心/换脚/收紧核心）
-- 示例："右膝内扣约15度，重心偏左偏移，导致左侧受力过大。建议外旋髋关节使膝盖朝前，同时降低重心2cm以稳定支撑。"
-- 示例："起步姿势好，双脚间距与肩同宽，重心低且稳定。右手抓点姿势正确，肩胛骨收紧。继续保持。"
 
 ### 标记系统（markers）
 markers 用于在图片上标注关键位置。每个标记包含：
 - type：error（错误）/ warning（警告）/ success（正确）/ info（提示）
 - label：短的标签名（如"膝盖内扣""重心偏左""手臂过直"）
-- description：详细描述（如"右膝内扣约15度，导致左侧受力过大，有脱脚风险"）
-  **注意**：error 和 warning 类型的 description 必须写具体问题和原因；success 类型的 description 必须写做得好的地方。
+- description：详细描述
+标记规则：数量严格限制在 5 个以内，标注位置指向具体身体部位。
 
-标记规则：
-1. 如果不确定，标注 warning 而非 error
-2. 标注位置（x, y）要指向具体的身体部位
-3. **数量严格限制在 5 个以内**
-
-### 典型错误模式参考（供 detailed_feedback 使用）
+### 典型错误模式参考
 高阶错误：膝盖内扣（外旋纠正）、手臂锁死（直臂支撑）、重心偏（降重心）、脚点滑脱（踩实再移手）、核心没收紧（收紧腹横肌）、挂脚错误（脚跟下压/脚尖勾紧）、动态失控（蓄力收腿）
 中级错误：肩部耸肩（沉肩）、抓点过紧（放松）、视线错误（提前规划）、未用 flagging（腿外摆平衡）、drop knee 不当（支撑膝下转）、呼吸憋气（移动前吸完成后呼）
 
 ### 纯中文要求
 **注意：以下所有字段的值必须使用纯中文，不允许出现英文单词：**
-- 「label」字段：纯中文，如「膝盖内扣」，不要写「knee inward」
-- 「description」字段：纯中文
-- 「instruction」字段：纯中文，不超过20个字
-- 「detailed_feedback」字段：纯中文，150字以内
-- 「detected_route_color」字段：纯中文，如「红色」「蓝色」
-- 不允许在以上字段中出现任何英文字母或英文标点
-
-JSON 字段名本身（markers、type、label 等）保留英文，这是格式要求，不违反纯中文规则。
+- 「label」「description」「instruction」「detailed_feedback」「detected_route_color」字段均使用纯中文
+- JSON 字段名本身（markers、type、label 等）保留英文，这是格式要求
 
 ### 线路规则
 - 首先观察攀爬者接触或踩踏的支点颜色，以此确定本次攀爬的目标颜色线路
 - success 标记必须严格限定在该颜色系列的支点上
-- detected_route_color 输出中文字符串
 
 ### 分析逻辑
-分析攀爬者当前身体位置（手在哪、脚在哪、重心在哪），然后判断：
-- 下一个支点在当前位置的什么方向
-- 距离大致多远
-- 支点形状
-- 用哪只手脚最合理
+分析攀爬者当前身体位置（手在哪、脚在哪、重心在哪），然后判断下一个支点在什么方向、距离多远、形状如何、用哪只手脚最合理。
 
-必须使用纯中文提供所有反馈（仅 JSON 字段名保留英文）。返回一个 JSON 对象，包含：
-- markers: { x: number (0-100), y: number (0-100), type: 'error' | 'warning' | 'info' | 'success', label: string（中文标签）, description: string（中文描述） } 数组
-- instruction: string（必须提供，纯中文，简短直接的行动指令）
-- detected_route_color: string（纯中文，识别出的线路颜色）
-- detailed_feedback: string（纯中文，**150字以内**，具体的姿态反馈和动作纠正分析，用于事后报告）
-- climb_status: 'moving' | 'steady' | 'stuck' | 'falling' | 'finished'
-- hold_positions（可选）: { x: number (0-100 百分比), y: number (0-100 百分比), color: string（纯中文，如"红色"）, type: string（纯中文，岩点类型如"大把手""深扣""小点""脚点"）, used: boolean（攀爬者是否使用了此岩点） } 数组，列出图片中可见的路线上所有岩点`;
+# JSON 输出格式
+{
+  "markers": [{"x": 0-100, "y": 0-100, "type": "error|warning|info|success", "label": "中文标签", "description": "中文描述"}],
+  "instruction": "纯中文简短行动指令",
+  "detected_route_color": "纯中文颜色",
+  "detailed_feedback": "纯中文姿态反馈（150字内）",
+  "climb_status": "moving|steady|stuck|falling|finished",
+  "climb_result": "SUCCESS|FAIL|UNKNOWN",
+  "end_game_reason": "终局裁判依据",
+  "top_control_score": 0-100整数,
+  "top_hand_match_status": "perfect_match|struggling_match|no_match",
+  "hold_positions": [{"x": 0-100, "y": 0-100, "color": "纯中文", "type": "纯中文", "used": true/false}]
+}`;
 
 // ─── Helper: call Zhipu chat API ────────────────────────────────
 async function zhipuChat(
@@ -142,12 +142,26 @@ async function zhipuChat(
 
 /** Attempt to extract a JSON object from a string and parse it */
 function extractJSON(text: string): any {
+  // 去掉可能的 markdown 包裹
+  let s = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
   try {
-    return JSON.parse(text);
+    return JSON.parse(s);
   } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
-    throw new Error("Could not parse AI response as JSON");
+    // 尝试 jsonrepair
+    try {
+      return JSON.parse(jsonrepair(s));
+    } catch {
+      // 正则兜底：取第一个 {} 块
+      const match = s.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          return JSON.parse(jsonrepair(match[0]));
+        } catch {
+          return JSON.parse(match[0]);
+        }
+      }
+      throw new Error("Could not parse AI response as JSON");
+    }
   }
 }
 
@@ -171,7 +185,7 @@ app.post("/api/analyze", async (req, res) => {
     }
 
     const text = await zhipuChat(
-      "glm-4v-flash", // 视觉模型
+      "glm-5v-turbo", // 视觉模型（升级：glm-4v-flash → glm-5v-turbo）
       [
         {
           role: "user",
@@ -344,6 +358,200 @@ app.get("/api/jwt", (req, res) => {
     const token = generateJWT(ZHIPU_API_KEY, 60);
     res.json({ token });
   } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── POST /api/analyze-async — Submit multi-frame async analysis ─
+app.post("/api/analyze-async", async (req, res) => {
+  try {
+    const { frames, prompt, motion_metadata, model = "glm-5v-turbo" } = req.body;
+    if (!frames || !frames.length || !prompt) {
+      return res.status(400).json({ error: "缺少 frames 或 prompt" });
+    }
+
+    // 注入骨骼数据小抄
+    let enrichedPrompt = prompt;
+    if (motion_metadata?.arm_analysis_supplement?.length > 0) {
+      const armLines = motion_metadata.arm_analysis_supplement
+        .map((a: any) => {
+          const parts = [`  [${a.timestamp}s]`];
+          if (a.left_elbow_angle != null) parts.push(`左肘角:${a.left_elbow_angle}°`);
+          if (a.right_elbow_angle != null) parts.push(`右肘角:${a.right_elbow_angle}°`);
+          if (a.note) parts.push(`备注:${a.note}`);
+          return parts.join(' | ');
+        })
+        .join('\n');
+      enrichedPrompt += `\n\n### 骨骼检测数据（MediaPipe 实际测量，非推测）\n${armLines}\n`;
+    }
+
+    const contentArray: any[] = [{ type: "text", text: enrichedPrompt }];
+    for (const frame of frames) {
+      contentArray.push({
+        type: "image_url",
+        image_url: { url: `data:image/jpeg;base64,${frame.base64}` },
+      });
+    }
+
+    const body = {
+      model,
+      messages: [{ role: "user", content: contentArray }],
+    };
+
+    const response = await fetch("https://open.bigmodel.cn/api/paas/v4/async/chat/completions", {
+      method: "POST",
+      headers: zhipuHeaders(),
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log(`[analyze-async] ✓ taskId: ${data.id}, status: ${data.task_status}`);
+    res.json({ success: true, taskId: data.id });
+  } catch (error: any) {
+    console.error("[analyze-async] error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── GET /api/query-result — Poll async task status ────────────
+app.get("/api/query-result", async (req, res) => {
+  const { taskId } = req.query;
+  if (!taskId) return res.status(400).json({ error: "缺少 taskId" });
+  console.log(`[query-result] polling taskId: ${taskId}`);
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    const response = await fetch(
+      `https://open.bigmodel.cn/api/paas/v4/async-result/${taskId}`,
+      { headers: { Authorization: `Bearer ${ZHIPU_API_KEY}` }, signal: controller.signal }
+    );
+    clearTimeout(timer);
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log(`[query-result] task_status: ${data.task_status}`);
+
+    if (data.task_status === "SUCCESS") {
+      const rawContent = data.choices?.[0]?.message?.content;
+      if (!rawContent) {
+        return res.json({ status: "SUCCESS", result: null });
+      }
+      // 去掉 Markdown 代码块包裹（```json ... ```）
+      const cleaned = rawContent.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+      try {
+        return res.json({ status: "SUCCESS", result: JSON.parse(cleaned) });
+      } catch {
+        return res.json({ status: "SUCCESS", result: rawContent });
+      }
+    } else if (data.task_status === "FAIL") {
+      return res.json({ status: "FAIL", error: data.error?.message || "AI 分析失败" });
+    } else {
+      return res.json({ status: "PROCESSING" });
+    }
+  } catch (error: any) {
+    console.error("[query-result] error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── POST /api/analyze-stream — 同步流式分析（服务端收流 → 单次返回） ─
+app.post("/api/analyze-stream", async (req, res) => {
+  try {
+    const { frames, prompt, motion_metadata, model = "glm-5v-turbo" } = req.body;
+    if (!frames || !frames.length || !prompt) {
+      return res.status(400).json({ error: "缺少 frames 或 prompt" });
+    }
+
+    // 注入骨骼数据小抄
+    let enrichedPrompt = prompt;
+    if (motion_metadata?.arm_analysis_supplement?.length > 0) {
+      const armLines = motion_metadata.arm_analysis_supplement
+        .map((a: any) => {
+          const parts = [`  [${a.timestamp}s]`];
+          if (a.left_elbow_angle != null) parts.push(`左肘角:${a.left_elbow_angle}°`);
+          if (a.right_elbow_angle != null) parts.push(`右肘角:${a.right_elbow_angle}°`);
+          if (a.note) parts.push(`备注:${a.note}`);
+          return parts.join(' | ');
+        })
+        .join('\n');
+      enrichedPrompt += `\n\n### 骨骼检测数据（MediaPipe 实际测量，非推测）\n${armLines}\n`;
+    }
+
+    const contentArray: any[] = [{ type: "text", text: enrichedPrompt }];
+    for (const frame of frames) {
+      contentArray.push({
+        type: "image_url",
+        image_url: { url: `data:image/jpeg;base64,${frame.base64}` },
+      });
+    }
+
+    console.log(`[analyze-stream] 开始流式请求，${frames.length} 帧`);
+
+    const body = {
+      model,
+      messages: [{ role: "user", content: contentArray }],
+      stream: true,
+    };
+
+    const zhipuRes = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
+      method: "POST",
+      headers: zhipuHeaders(),
+      body: JSON.stringify(body),
+    });
+
+    if (!zhipuRes.ok) {
+      const errText = await zhipuRes.text().catch(() => '');
+      console.error(`[analyze-stream] Zhipu API ${zhipuRes.status}: ${errText.slice(0, 200)}`);
+      return res.status(502).json({ error: `智谱 API ${zhipuRes.status}` });
+    }
+
+    // 服务端收流：读取智谱 SSE 流，只提取 delta.content
+    const reader = zhipuRes.body?.getReader();
+    if (!reader) {
+      return res.status(502).json({ error: "无法读取响应流" });
+    }
+
+    const decoder = new TextDecoder();
+    let fullContent = '';
+    let parsed = false;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: !done });
+
+      // 逐行解析 SSE data: {...}
+      for (const line of chunk.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data: ')) continue;
+        const dataStr = trimmed.slice(6);
+        if (dataStr === '[DONE]') { parsed = true; continue; }
+        try {
+          const event = JSON.parse(dataStr);
+          const delta = event.choices?.[0]?.delta?.content;
+          if (delta) fullContent += delta;
+          // 第一次收到 content 标记已解析
+          if (delta) parsed = true;
+        } catch { /* 跳过无法解析的行 */ }
+      }
+    }
+
+    console.log(`[analyze-stream] 流式完成, 收到 ${fullContent.length} 字符, 已解析=${parsed}`);
+
+    // 返回纯 JSON（非 SSE）
+    res.json({ content: fullContent, parsed });
+  } catch (error: any) {
+    console.error("[analyze-stream] error:", error.message);
     res.status(500).json({ error: error.message });
   }
 });

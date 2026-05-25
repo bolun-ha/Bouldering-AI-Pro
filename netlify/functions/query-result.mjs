@@ -14,7 +14,7 @@ export async function handler(event) {
 
   try {
     const res = await fetch(
-      `https://open.bigmodel.cn/api/paas/v4/async/chat/completions/${taskId}`,
+      `https://open.bigmodel.cn/api/paas/v4/async-result/${taskId}`,
       {
         headers: { Authorization: `Bearer ${ZHIPU_API_KEY}` },
       }
@@ -40,14 +40,15 @@ export async function handler(event) {
           body: JSON.stringify({ status: "SUCCESS", result: null }),
         };
       }
-      // 尝试解析 JSON
+      // 去除 Markdown 代码块包裹（```json ... ```）
+      const cleaned = rawContent.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
       try {
         return {
           statusCode: 200,
           headers: corsHeaders,
           body: JSON.stringify({
             status: "SUCCESS",
-            result: JSON.parse(rawContent),
+            result: JSON.parse(cleaned),
           }),
         };
       } catch {

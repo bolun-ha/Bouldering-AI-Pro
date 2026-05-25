@@ -135,10 +135,18 @@ export async function initAllEngines(): Promise<void> {
 export function detectPose(
   video: HTMLVideoElement,
   timestamp: number,
+  imageDimensions?: { width: number; height: number },
 ): PoseResult | null {
   if (!poseLandmarker || !video || video.readyState < 2) return null;
   try {
-    const result = poseLandmarker.detectForVideo(video, timestamp);
+    // 优先使用调用方传入的尺寸，回退到 video 元素元数据
+    const dims = imageDimensions?.width && imageDimensions?.height
+      ? imageDimensions
+      : video.videoWidth && video.videoHeight
+        ? { width: video.videoWidth, height: video.videoHeight }
+        : null;
+    const options = dims ? { imageDimensions: dims } : undefined;
+    const result = poseLandmarker.detectForVideo(video, timestamp, options);
     if (!result.landmarks || result.landmarks.length === 0) return null;
     return {
       landmarks: result.landmarks[0],
@@ -154,10 +162,16 @@ export function detectPose(
 export function detectHands(
   video: HTMLVideoElement,
   timestamp: number,
+  imageDimensions?: { width: number; height: number },
 ): HandResult[] {
   if (!handLandmarker || !video || video.readyState < 2) return [];
   try {
-    const result = handLandmarker.detectForVideo(video, timestamp);
+    const options = imageDimensions
+      ? { imageDimensions }
+      : video.videoWidth && video.videoHeight
+        ? { imageDimensions: { width: video.videoWidth, height: video.videoHeight } }
+        : undefined;
+    const result = handLandmarker.detectForVideo(video, timestamp, options);
     if (!result.landmarks || result.landmarks.length === 0) return [];
     return result.landmarks.map((lm, i) => ({
       landmarks: lm,
