@@ -34,6 +34,18 @@
   status = 200
   force = true
 
+[[redirects]]
+  from = "/api/analyze-async"
+  to = "/.netlify/functions/analyze-async"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/query-result"
+  to = "/.netlify/functions/query-result"
+  status = 200
+  force = true
+
 # SPA 路由回退
 [[redirects]]
   from = "/*"
