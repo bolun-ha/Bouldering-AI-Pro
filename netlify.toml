@@ -46,6 +46,12 @@
   status = 200
   force = true
 
+[[redirects]]
+  from = "/api/analyze-stream"
+  to = "/.netlify/functions/analyze-stream"
+  status = 200
+  force = true
+
 # SPA 路由回退
 [[redirects]]
   from = "/*"
