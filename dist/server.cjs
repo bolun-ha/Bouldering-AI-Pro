@@ -487,7 +487,14 @@ ${armLines}
       }
     }
     console.log(`[analyze-stream] \u6D41\u5F0F\u5B8C\u6210, \u6536\u5230 ${fullContent.length} \u5B57\u7B26, \u5DF2\u89E3\u6790=${parsed}`);
-    res.json({ content: fullContent, parsed });
+    let finalContent = fullContent.trim();
+    finalContent = finalContent.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "");
+    const firstBrace = finalContent.indexOf("{");
+    const lastBrace = finalContent.lastIndexOf("}");
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      finalContent = finalContent.slice(firstBrace, lastBrace + 1);
+    }
+    res.json({ content: finalContent, parsed });
   } catch (error) {
     console.error("[analyze-stream] error:", error.message);
     res.status(500).json({ error: error.message });
