@@ -41,6 +41,7 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
   const rawRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const rawChunksRef = useRef<Blob[]>([]);
+  const mimeTypeRef = useRef<string>('video/webm');
   const rafRef = useRef<number>(0);
   const markersRef = useRef<Marker[]>(markers);
   const isRecordingRef = useRef<boolean>(false);
@@ -199,6 +200,7 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
       try {
         const stream = canvas.captureStream(Math.min(fps, 30));
         const mimeType = getMimeType();
+        mimeTypeRef.current = mimeType;
         const mediaRecorder = new MediaRecorder(stream, { mimeType });
         mediaRecorderRef.current = mediaRecorder;
 
@@ -245,7 +247,7 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
       const tryComplete = () => {
         if (!annotatedDone || !rawDone) return;
         isRecordingRef.current = false;
-        const annotatedBlob = new Blob(chunksRef.current, { type: 'video/webm' });
+        const annotatedBlob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
         console.log(`录制完成: 标注版 ${(annotatedBlob.size / 1024 / 1024).toFixed(1)}MB, 原始版 ${(rawBlobResult?.size || 0) / 1024 / 1024}MB`);
         onRecordingComplete({ annotatedBlob, rawBlob: rawBlobResult || annotatedBlob });
       };
@@ -262,7 +264,7 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
 
       if (rawRecorderRef.current && rawRecorderRef.current.state !== 'inactive') {
         rawRecorderRef.current.onstop = () => {
-          rawBlobResult = new Blob(rawChunksRef.current, { type: 'video/webm' });
+          rawBlobResult = new Blob(rawChunksRef.current, { type: mimeTypeRef.current });
           rawDone = true;
           tryComplete();
         };
@@ -274,7 +276,7 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
       // 如果没有异步 recorder 需要等待，立即触发
       if (annotatedDone && rawDone) {
         isRecordingRef.current = false;
-        const annotatedBlob = new Blob(chunksRef.current, { type: 'video/webm' });
+        const annotatedBlob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
         onRecordingComplete({
           annotatedBlob,
           rawBlob: rawBlobResult || annotatedBlob,

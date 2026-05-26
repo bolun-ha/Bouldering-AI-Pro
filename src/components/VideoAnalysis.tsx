@@ -330,6 +330,9 @@ export function VideoAnalysis() {
     if (!file) return;
     if (videoUrl) URL.revokeObjectURL(videoUrl);
 
+    // 诊断：打印文件格式（移动端兼容性排查用）
+    console.log('[upload]', file.name, 'type:', file.type, 'size:', (file.size / 1024 / 1024).toFixed(1) + 'MB');
+
     setVideoFile(file);
     setVideoUrl(URL.createObjectURL(file));
     setPhase('idle');
