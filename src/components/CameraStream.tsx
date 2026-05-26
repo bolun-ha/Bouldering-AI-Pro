@@ -232,6 +232,9 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
         await initAllEngines();
         poseActiveRef.current = true;
 
+        // MediaPipe 要求严格单调递增的时间戳，requestAnimationFrame 可能送回退值
+        const monotonicTsRef = { current: 0 };
+
         const tick = (timestamp: number) => {
           if (!poseActiveRef.current) return;
           rafId = requestAnimationFrame(tick);
@@ -239,10 +242,14 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           const video = videoRef.current;
           if (!video || video.readyState < 2) return;
 
+          // 保证时间戳严格单调递增
+          const mediapipeTs = Math.floor(Math.max(timestamp, monotonicTsRef.current + 1));
+          monotonicTsRef.current = mediapipeTs;
+
           // Pose 检测
           if (timestamp - lastPoseTime >= poseInterval) {
             lastPoseTime = timestamp;
-            const poseRes = detectPose(video, timestamp);
+            const poseRes = detectPose(video, mediapipeTs);
             if (poseRes) {
               poseLandmarksRef.current = poseRes.landmarks;
             }
@@ -252,7 +259,7 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           let handsThisFrame: HandRes[] | undefined;
           if (timestamp - lastHandTime >= handInterval) {
             lastHandTime = timestamp;
-            const handRes = detectHands(video, timestamp);
+            const handRes = detectHands(video, mediapipeTs);
             handResultsRef.current = handRes as unknown as HandRes[];
             handsThisFrame = handRes.length > 0 ? (handRes as unknown as HandRes[]) : undefined;
           }
