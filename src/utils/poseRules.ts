@@ -60,11 +60,11 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
     if (h && k && a) {
       const kneeAngle = angleBetween(h, k, a);
       angleLogs.push(`${side}膝角=${kneeAngle.toFixed(1)}°`);
-      // 膝角 < 150° 且 脚在髋外侧（踩高脚点）→ 可能内扣，检查 z 轴
-      if (kneeAngle < 150) {
+      // 膝角 < 130° 且 脚在髋外侧（踩高脚点）→ 可能内扣，检查 z 轴
+      if (kneeAngle < 130) {
         // 膝盖向内偏移（z 值负方向）
         const inward = side === '左' ? k.z < h.z : k.z > h.z;
-        if (inward && kneeAngle < 140) {
+        if (inward && kneeAngle < 120) {
           markers.push({
             x: k.x * 100,
             y: k.y * 100,
@@ -96,7 +96,7 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
     if (s && e && w) {
       const elbowAngle = angleBetween(s, e, w);
       angleLogs.push(`${side}肘角=${elbowAngle.toFixed(1)}°`);
-      if (elbowAngle > 150) {
+      if (elbowAngle > 165) {
         markers.push({
           x: e.x * 100,
           y: e.y * 100,
@@ -130,7 +130,7 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
 
     angleLogs.push(`重心x=${(centerX * 100).toFixed(1)}%, 支撑面宽=${(stanceWidth * 100).toFixed(1)}%, 偏移比=${relDeviation.toFixed(2)}`);
 
-    if (relDeviation > 0.4) {
+    if (relDeviation > 0.6) {
       // 重心偏向一边
       const side = centerX < (lAnkle.x + rAnkle.x) / 2 ? '左' : '右';
       markers.push({
@@ -152,7 +152,7 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
     const s = get(shoulder);
     if (s && nose) {
       // 耸肩简单判断：肩膀 y 坐标接近或高于鼻尖 y（正常应明显低于鼻尖）
-      if (s.y < nose.y + 0.05) {
+      if (s.y < nose.y - 0.03) {
         markers.push({
           x: s.x * 100,
           y: s.y * 100,
@@ -170,7 +170,7 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
     const avgZ = (lHip.z + rHip.z) / 2;
     angleLogs.push(`臀深度z=${avgZ.toFixed(3)}`);
     // 正 z 表示远离墙（MediaPipe 坐标系统）
-    if (avgZ > 0.07) {
+    if (avgZ > 0.12) {
       markers.push({
         x: ((lHip.x + rHip.x) / 2) * 100,
         y: ((lHip.y + rHip.y) / 2) * 100,
@@ -190,7 +190,7 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
     const hipCenterX = (lHip.x + rHip.x) / 2;
     const coreTwist = Math.abs(shoulderCenterX - hipCenterX);
     angleLogs.push(`核心扭转=${(coreTwist * 100).toFixed(1)}%`);
-    if (coreTwist > 0.06) {
+    if (coreTwist > 0.10) {
       markers.push({
         x: ((lHip.x + rHip.x) / 2) * 100,
         y: ((lHip.y + rHip.y) / 2) * 100,
@@ -202,8 +202,8 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
   }
 
   // ─── 7. 限制最大显示标注数 ─────────────────────────────────────
-  // 手机屏幕小，标注太多反而看不清。策略：最多 4 个，error 优先 + warning 补满
-  const MAX_MARKERS = 4;
+  // 手机屏幕小，标注太多反而看不清。策略：最多 2 个，error 优先
+  const MAX_MARKERS = 2;
   const errors = markers.filter(m => m.type === 'error');
   const warnings = markers.filter(m => m.type === 'warning');
 

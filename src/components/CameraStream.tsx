@@ -21,6 +21,7 @@ import {
 } from '../utils/poseEngine';
 import { applyContourOverlay } from '../utils/contourOverlay';
 import { analyzePose } from '../utils/poseRules';
+import { Overlay } from './Overlay';
 import type { Marker, HandResult } from '../types';
 
 /** 帧缓冲区条目 */
@@ -38,6 +39,40 @@ interface HandRes {
   landmarks: NormalizedLandmark[];
   handedness: 'Left' | 'Right';
   score: number;
+}
+
+/**
+ * 调整 MediaPipe 坐标 → 显示容器坐标
+ * video 使用 object-cover（中心裁剪），MediaPipe 0-1 是全帧坐标
+ * 需将全帧坐标映射到可见裁切区域
+ */
+function adjustCoords(video: HTMLVideoElement, x: number, y: number): { x: number; y: number } {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const cw = video.offsetWidth, ch = video.offsetHeight;
+  if (!vw || !vh || !cw || !ch) return { x, y };
+
+  const vAR = vw / vh;
+  const cAR = cw / ch;
+
+  let adjX = x, adjY = y;
+
+  if (vAR > cAR) {
+    // 视频更宽：object-cover 裁切左右
+    const visibleRatio = cAR / vAR; // 可见宽度占全帧比例
+    const cropStart = (1 - visibleRatio) / 2;
+    adjX = Math.max(0, Math.min(1, (x - cropStart) / visibleRatio));
+    // Y 方向无裁剪
+    adjY = y;
+  } else {
+    // 容器更宽/更高：object-cover 裁切上下
+    const visibleRatio = vAR / cAR; // 可见高度占全帧比例
+    const cropStart = (1 - visibleRatio) / 2;
+    adjY = Math.max(0, Math.min(1, (y - cropStart) / visibleRatio));
+    // X 方向无裁剪
+    adjX = x;
+  }
+
+  return { x: adjX, y: adjY };
 }
 
 interface CameraStreamProps {
@@ -232,7 +267,12 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           // 仅在录制中时才发送姿态标注（防止未开始攀爬就显示）
           if (isRecording && onPoseMarkers && poseLandmarksRef.current.length > 0) {
             const ruleResult = analyzePose(poseLandmarksRef.current);
-            onPoseMarkers(ruleResult.markers, poseLandmarksRef.current, handsThisFrame);
+            // 校正坐标：考虑 object-contain 黑边，使标注贴合实际身体部位
+            const adjusted = ruleResult.markers.map(m => {
+              const { x, y } = adjustCoords(video, m.x / 100, m.y / 100);
+              return { ...m, x: x * 100, y: y * 100 };
+            });
+            onPoseMarkers(adjusted, poseLandmarksRef.current, handsThisFrame);
           }
 
           // ── 卡关检测 ────────────────────────────────────────
@@ -376,7 +416,7 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
         autoPlay
         playsInline
         muted
-        className="w-full h-full object-cover"
+        className="w-full h-full object-contain"
       />
       <canvas ref={canvasRef} className="hidden" />
     </div>
