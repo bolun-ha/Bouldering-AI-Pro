@@ -229,7 +229,8 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           }
 
           // 规则引擎 + 回调
-          if (onPoseMarkers && poseLandmarksRef.current.length > 0) {
+          // 仅在录制中时才发送姿态标注（防止未开始攀爬就显示）
+          if (isRecording && onPoseMarkers && poseLandmarksRef.current.length > 0) {
             const ruleResult = analyzePose(poseLandmarksRef.current);
             onPoseMarkers(ruleResult.markers, poseLandmarksRef.current, handsThisFrame);
           }
