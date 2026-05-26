@@ -30,6 +30,7 @@ var import_dotenv = __toESM(require("dotenv"), 1);
 var import_crypto = __toESM(require("crypto"), 1);
 var import_jsonrepair = require("jsonrepair");
 import_dotenv.default.config();
+var scriptDir = import_path.default.dirname(process.argv[1] || "");
 var app = (0, import_express.default)();
 var PORT = 3003;
 app.use(import_express.default.json({ limit: "10mb" }));
@@ -449,15 +450,15 @@ ${armLines}
       stream: true
     };
     let zhipuRes = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 5; attempt++) {
       zhipuRes = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
         method: "POST",
         headers: zhipuHeaders(),
         body: JSON.stringify(body)
       });
       if (zhipuRes.ok || zhipuRes.status !== 429) break;
-      const waitMs = Math.min(2e3 * Math.pow(2, attempt - 1), 8e3);
-      console.warn(`[analyze-stream] \u667A\u8C31 429 \u9650\u6D41 (attempt ${attempt}/3), \u7B49\u5F85 ${waitMs}ms`);
+      const waitMs = Math.min(3e3 * Math.pow(2, attempt - 1), 4e4);
+      console.warn(`[analyze-stream] \u667A\u8C31 429 \u9650\u6D41 (attempt ${attempt}/5), \u7B49\u5F85 ${waitMs}ms`);
       await new Promise((r) => setTimeout(r, waitMs));
     }
     if (!zhipuRes || !zhipuRes.ok) {
@@ -532,7 +533,7 @@ ${armLines}
   }
 });
 async function startServer() {
-  const isProduction = process.env.NODE_ENV === "production" || import_fs.default.existsSync(import_path.default.join(__dirname, "index.html"));
+  const isProduction = import_fs.default.existsSync(import_path.default.join(scriptDir, "index.html"));
   if (!isProduction) {
     const vite = await (0, import_vite.createServer)({
       server: { middlewareMode: true },
@@ -540,10 +541,9 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = __dirname;
-    app.use(import_express.default.static(distPath));
+    app.use(import_express.default.static(scriptDir));
     app.get("*", (req, res) => {
-      res.sendFile(import_path.default.join(distPath, "index.html"));
+      res.sendFile(import_path.default.join(scriptDir, "index.html"));
     });
   }
   app.listen(PORT, "0.0.0.0", () => {

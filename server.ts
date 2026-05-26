@@ -8,6 +8,11 @@ import { jsonrepair } from "jsonrepair";
 
 dotenv.config();
 
+// 获取当前脚本所在目录（兼容 ESM/tsx 和 CJS 产物）
+// - tsx dev: process.argv[1] = "server.ts" → dirname = "." → index.html 在 dist/ 不存在 → Vite 中间件
+// - CJS prod (ECS): process.argv[1] = "/var/www/dist/server.cjs" → dirname = "/var/www/dist/" → index.html 存在 → express.static
+const scriptDir = path.dirname(process.argv[1] || '');
+
 const app = express();
 const PORT = 3003;
 
@@ -504,17 +509,17 @@ app.post("/api/analyze-stream", async (req, res) => {
       stream: true,
     };
 
-    // 智谱 429 重试（指数退避，最多 3 次）
+    // 智谱 429 重试（指数退避，最多 5 次，最长等 40s）
     let zhipuRes: Response | null = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 5; attempt++) {
       zhipuRes = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
         method: "POST",
         headers: zhipuHeaders(),
         body: JSON.stringify(body),
       });
       if (zhipuRes.ok || zhipuRes.status !== 429) break;
-      const waitMs = Math.min(2e3 * Math.pow(2, attempt - 1), 8e3);
-      console.warn(`[analyze-stream] 智谱 429 限流 (attempt ${attempt}/3), 等待 ${waitMs}ms`);
+      const waitMs = Math.min(3e3 * Math.pow(2, attempt - 1), 40e3);
+      console.warn(`[analyze-stream] 智谱 429 限流 (attempt ${attempt}/5), 等待 ${waitMs}ms`);
       await new Promise((r) => setTimeout(r, waitMs));
     }
 
@@ -598,9 +603,8 @@ app.post("/api/analyze-stream", async (req, res) => {
 
 // ─── Vite dev server / static serve ─────────────────────────────
 async function startServer() {
-  // 自动判断：server.cjs 在 dist/ 目录下时，index.html 就在同目录
-  const isProduction = process.env.NODE_ENV === "production" ||
-    fs.existsSync(path.join(__dirname, "index.html"));
+  // 自动判断：scriptDir 下 index.html 存在 → production（express.static），否则 dev（Vite 中间件）
+  const isProduction = fs.existsSync(path.join(scriptDir, "index.html"));
 
   if (!isProduction) {
     const vite = await createViteServer({
@@ -609,10 +613,9 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = __dirname;  // server.cjs 就在 dist/ 目录下
-    app.use(express.static(distPath));
+    app.use(express.static(scriptDir));
     app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+      res.sendFile(path.join(scriptDir, "index.html"));
     });
   }
 
