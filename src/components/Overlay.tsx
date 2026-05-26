@@ -23,10 +23,10 @@ export const Overlay: React.FC<OverlayProps> = ({ markers }) => {
         {markers.map((marker, index) => (
           <motion.div
             key={`${index}-${marker.label}`}
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0, opacity: 0 }}
-            transition={{ type: 'spring', damping: 15 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
             style={{ 
               left: `${marker.x}%`, 
               top: `${marker.y}%`, 

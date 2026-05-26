@@ -191,24 +191,46 @@ export default function App() {
     }
   }, [isRecording, isAnalyzing]);
 
-  // MediaPipe 实时姿态标记
+  // MediaPipe 实时姿态标记（带稳定性缓冲，防频闪）
+  const stableMarkersRef = useRef<{ markers: Marker[]; timestamp: number }>({ markers: [], timestamp: 0 });
   const handlePoseMarkers = useCallback((markers: import('./types').Marker[], _landmarks: any, hands?: any[]) => {
     // 保存手部数据
     if (hands && hands.length > 0) {
       handResultsRef.current = hands;
     }
     if (markers.length === 0) return;
+
+    const now = Date.now();
+    const stable = stableMarkersRef.current;
+
+    // 稳定性缓冲：新标记必须连续出现 2 帧才显示
+    // 已显示的标记必须连续缺失 300ms 才移除
+    const currentLabels = new Set(markers.map(m => m.label));
+    const stableLabels = new Set(stable.markers.map(m => m.label));
+
+    // 新出现的标注需要"确认"
+    const newMarkers = markers.filter(m => !stableLabels.has(m.label));
+    // 已稳定的标注只移除消失超过 300ms 的
+    const keepMarkers = stable.markers.filter(m => {
+      if (currentLabels.has(m.label)) return true;
+      return (now - stable.timestamp) < 300;
+    });
+
+    const stabilized = [...keepMarkers, ...newMarkers];
+
+    stableMarkersRef.current = { markers: stabilized, timestamp: now };
+
     setCurrentResult(prev => {
       if (!prev) {
         return {
-          markers,
+          markers: stabilized,
           instruction: '',
           detailed_feedback: '',
           detected_route_color: '',
           climb_status: 'moving',
         };
       }
-      const ruleMarkers = markers.filter(m => m.type === 'error' || m.type === 'warning');
+      const ruleMarkers = stabilized.filter(m => m.type === 'error' || m.type === 'warning');
       const aiMarkers = prev.markers.filter(m => m.type === 'success' || m.type === 'info');
       const combined = [...ruleMarkers, ...aiMarkers];
       return { ...prev, markers: combined };
