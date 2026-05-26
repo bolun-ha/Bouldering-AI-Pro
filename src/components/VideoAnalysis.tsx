@@ -171,13 +171,16 @@ export function VideoAnalysis() {
     if (firstBrace >= 0 && lastBrace > firstBrace) {
       s = s.slice(firstBrace, lastBrace + 1);
     }
-    // 2. 去掉尾随逗号（常见于 AI 生成的数组/对象末尾）
-    s = s.replace(/,\s*}/g, '}').replace(/,\s*\]/g, ']');
-    // 3. 单引号 → 双引号（jsonrepair 有时对中文单引号敏感）
+    // 2. 单引号 → 双引号
     s = s.replace(/'/g, '"');
+    // 3. 去掉尾随逗号（常见于 AI 生成的数组/对象末尾）
+    s = s.replace(/,\s*}/g, '}').replace(/,\s*\]/g, ']');
     // 4. 未引号属性名补引号
     s = s.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-    // 5. jsonrepair 自动修复合（兜不住时 return 原始串）
+    // 5. 修复属性名后直接跟字符串值（缺少冒号和值前的引号）
+    //    匹配: "key" "value" 或 "key "value" → 变成 "key": "value"
+    s = s.replace(/("[\w_\s]+")\s+("(?:[^"\\]|\\.)*")/g, '$1: $2');
+    // 6. jsonrepair 自动修复合
     try {
       return jsonrepair(s);
     } catch {
