@@ -344,10 +344,22 @@ export function VideoAnalysis() {
         video.addEventListener('loadedmetadata', () => resolve(), { once: true });
       });
     }
-    const duration = video.duration;
-    if (!duration || !isFinite(duration)) {
-      console.error('[VideoAnalysis] invalid video duration:', duration);
-      setErrorText('视频时长信息无效，请检查视频格式是否为 H.264 编码的 MP4（部分手机录制的视频格式不支持）');
+    // 额外等待实际帧数据加载完毕（移动端 Safari 常见问题：loadedmetadata 后 drawImage 仍是黑帧）
+    if (video.readyState < 3) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 3000); // 3 秒兜底
+        video.addEventListener('canplay', () => { clearTimeout(timer); resolve(); }, { once: true });
+      });
+    }
+    let duration = video.duration;
+    if (duration <= 0 || !isFinite(duration) || duration === Infinity) {
+      console.warn('[VideoAnalysis] waiting for valid duration, current:', duration);
+      await new Promise<void>((r) => setTimeout(r, 1000));
+      duration = video.duration;
+    }
+    if (duration <= 0 || !isFinite(duration) || duration === Infinity) {
+      console.error('[VideoAnalysis] invalid video duration after retry:', duration);
+      setErrorText('无法读取视频时长，可能是手机浏览器不支持的视频格式。请检查视频能否正常播放，或尝试重新录制。');
       setPhase('error');
       return;
     }
@@ -426,6 +438,18 @@ export function VideoAnalysis() {
             }
             const dataUrl = canvas.toDataURL('image/jpeg', QUALITY);
             const base64 = dataUrl.replace(/^data:image\/jpeg;base64,/, '');
+
+            // 检查是否为全黑帧（移动端 Safari 常见问题：loadedmetadata 后 drawImage 仍是黑帧）
+            try {
+              const imgData = ctx!.getImageData(0, 0, 4, 4);
+              const isBlack = imgData.data.every((v) => v === 0);
+              if (isBlack) {
+                console.warn(`[Frame] 帧 ${targetTime.toFixed(1)}s 是全黑，可能是移动端视频解码问题`);
+              }
+            } catch (_e) {
+              // getImageData 可能因 canvas 污染抛 SecurityError，静默忽略
+            }
+
             extracted.push({ base64, timestamp: targetTime });
 
             // ── 骨骼检测：提取手臂角度 ──
@@ -495,9 +519,10 @@ export function VideoAnalysis() {
     setProgress(46);
     setStatusText('正在提交给 AI 分析...');
 
-    const timestamps = extracted.map((f, i) =>
-      `第${i + 1}张：${f.timestamp.toFixed(1)}秒`
-    ).join('\n');
+    const timestamps = extracted.map((f, i) => {
+      const ts = f.timestamp ?? i * interval;
+      return `第${i + 1}张：${Number.isFinite(ts) ? ts.toFixed(1) : '?'}秒`;
+    }).join('\n');
 
     const prompt = `# Role
 你是一名国家级专业抱石攀岩教练兼比赛主裁判。请分析输入的${DEFAULT_FRAME_COUNT}张按时间排序的攀岩截图，并结合我为你提供的前端骨骼检测元数据（MediaPipe 实测肘关节角度），进行深度、连贯的复盘。
