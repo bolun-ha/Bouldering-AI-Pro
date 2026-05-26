@@ -648,38 +648,62 @@ ${timestamps}
           } catch (_e) {
             // 记录原始输出以便调试
             console.warn('[AI parse] 原始输出 (首1500字符):', cleaned.slice(0, 1500));
-            // 更全面的 fallback regex: 尝试提取所有可识别的字段
-            const climbResult = cleaned.match(/["']climb_result["']\s*:\s*["'](SUCCESS|FAIL|UNKNOWN)["']/i);
-            const overallScore = cleaned.match(/["']overall_score["']\s*:\s*(\d+)/i);
-            const summary = cleaned.match(/["']summary["']\s*:\s*["']([^"']+?)["'](?=\s*[,}])/i);
-            const trend = cleaned.match(/["']trend["']\s*:\s*["']([^"']+?)["'](?=\s*[,}])/i);
-            // 提取 issues 数组（如果有）
-            let issues: any[] = [];
-            try {
-              const issuesMatch = cleaned.match(/["']issues["']\s*:\s*\[([\s\S]*?)\](?=\s*[,}]\s*["'](?:strengths|weaknesses|improvements|phases|summary))/i);
-              if (issuesMatch) {
-                // 尝试解析 issues 子项（可能格式不完整，但逐个提取 timestamp/description）
-                const issueItems = issuesMatch[1].match(/\{[^}]+\}/g) || [];
-                issues = issueItems.map((item) => {
-                  const ts = parseFloat(item.match(/["']timestamp["']\s*:\s*([\d.]+)/i)?.[1] || '0');
-                  const desc = item.match(/["']description["']\s*:\s*["']([^"']+?)["']/i)?.[1] || '';
-                  return { timestamp: ts, description: desc, type: 'warning' };
-                }).filter((i: any) => i.description);
+            // 暴力搜索：尝试在所有 {…} 位置解析，找不到就逐个字段 regex
+            let extractedFromBraces: any = null;
+            let braceStart = 0;
+            while (!extractedFromBraces && braceStart >= 0) {
+              braceStart = cleaned.indexOf('{', braceStart);
+              if (braceStart < 0) break;
+              const braceEnd = cleaned.indexOf('}', braceStart);
+              if (braceEnd < 0) break;
+              const candidate = cleaned.slice(braceStart, braceEnd + 1);
+              try {
+                extractedFromBraces = JSON.parse(candidate);
+                break;
+              } catch {
+                try {
+                  extractedFromBraces = JSON.parse(repairJSON(candidate));
+                  break;
+                } catch {
+                  braceStart = braceStart + 1;
+                }
               }
-            } catch { /* 忽略 issues 解析失败 */ }
-            analysisResult = {
-              climb_result: (climbResult?.[1] as any) || 'UNKNOWN',
-              end_game_reason: issues.length > 0 ? '' : 'AI 输出格式异常，请重试',
-              overall_score: overallScore ? parseInt(overallScore[1]) : 50,
-              summary: summary?.[1] || '分析完成',
-              trend: trend?.[1] || 'unknown',
-              sequence_analysis: '',
-              issues,
-              phases: [],
-              strengths: [],
-              weaknesses: [],
-              improvements: [],
-            } as VideoAnalysisResult;
+            }
+            // 如果暴力搜索解析成功，用它的字段补全默认值
+            if (extractedFromBraces && typeof extractedFromBraces === 'object') {
+              analysisResult = {
+                climb_result: extractedFromBraces.climb_result || 'UNKNOWN',
+                overall_score: extractedFromBraces.overall_score ?? 50,
+                summary: extractedFromBraces.summary || '分析完成',
+                sequence_analysis: extractedFromBraces.sequence_analysis || '',
+                end_game_reason: extractedFromBraces.end_game_reason || '',
+                trend: extractedFromBraces.trend || 'unknown',
+                issues: extractedFromBraces.issues || [],
+                phases: extractedFromBraces.phases || [],
+                strengths: extractedFromBraces.strengths || [],
+                weaknesses: extractedFromBraces.weaknesses || [],
+                improvements: extractedFromBraces.improvements || [],
+              } as VideoAnalysisResult;
+            } else {
+              // 正则逐个字段提取
+              const climbResult = cleaned.match(/["']climb_result["']\s*:\s*["'](SUCCESS|FAIL|UNKNOWN)["']/i);
+              const overallScore = cleaned.match(/["']overall_score["']\s*:\s*(\d+)/i);
+              const summary = cleaned.match(/["']summary["']\s*:\s*["'](.+?)["'](?=\s*[,}])/i);
+              const rawSnippet = cleaned.replace(/[\r\n]/g, ' ').slice(0, 200);
+              analysisResult = {
+                climb_result: (climbResult?.[1] as any) || 'UNKNOWN',
+                overall_score: overallScore ? parseInt(overallScore[1]) : 50,
+                summary: summary?.[1] || `AI 返回格式异常。原始响应(前200字符): ${rawSnippet}`,
+                sequence_analysis: '',
+                end_game_reason: '',
+                trend: 'unknown',
+                issues: [],
+                phases: [],
+                strengths: [],
+                weaknesses: [],
+                improvements: [],
+              } as VideoAnalysisResult;
+            }
           }
         }
       } finally {
