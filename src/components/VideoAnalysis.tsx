@@ -79,6 +79,9 @@ export function VideoAnalysis() {
   const [keyframes, setKeyframes] = useState<Record<number, string>>({});
   const [selectedPhase, setSelectedPhase] = useState<string | null>(null); // 联动过滤
 
+  // ── 实时流式日志（瀑布流菊花替代方案） ──
+  const [liveLog, setLiveLog] = useState('');
+
   // ── TaskId（state 驱动轮询 useEffect，StrictMode 安全）──
   // taskId removed — replaced by streaming
 
@@ -132,6 +135,7 @@ export function VideoAnalysis() {
     const decoder = new TextDecoder();
     let buffer = '';
     let result = '';
+    let completeContent = ''; // 服务端发来的完整 JSON
 
     while (true) {
       const { done, value } = await reader.read();
@@ -149,18 +153,34 @@ export function VideoAnalysis() {
           try {
             const parsed = JSON.parse(dataStr);
             if (parsed.error) throw new Error(parsed.error);
-            const content = parsed.choices?.[0]?.delta?.content || '';
-            buffer += content;
-            onProgress(buffer);
+
+            // __complete 事件：服务端发来的完整 JSON
+            if (parsed.__complete && parsed.content) {
+              completeContent = parsed.content;
+              continue;
+            }
+
+            // __delta 事件：服务端实时转发的文本增量
+            if (parsed.__delta && parsed.text) {
+              buffer += parsed.text;
+              onProgress(buffer);
+              continue;
+            }
+
+            // 旧的 Zhipu SSE 格式（choices[0].delta.content）
+            const content = parsed.choices?.[0]?.delta?.content;
+            if (content) {
+              buffer += content;
+              onProgress(buffer);
+            }
           } catch (e: any) {
             if (e.message !== 'Unexpected token') throw e;
           }
         }
       }
     }
-    // 最终返回完整 buffer（即完整 JSON 字符串）
-    // fallback: 如果 SSE 解析没拿到内容，直接返回原始响应体
-    return buffer || result;
+    // 优先返回服务端清理过的完整 JSON，其次用累积的 buffer
+    return completeContent || buffer || result;
   }, []);
   // ── AI 输出 JSON 修复（处理常见格式错误） ──
   function repairJSON(raw: string): string {
@@ -627,21 +647,29 @@ ${timestamps}
           throw new Error(err.error || `提交失败 HTTP ${res.status}`);
         }
 
-        // 读取流
+        // 读取流（SSE，支持实时 Text 瀑布流）
+        setPhase('analyzing');
         setStatusText('AI 教练正在实时看片...');
-        const json = await res.json();
-        const rawJson = json.content || '';
+        setLiveLog('');
 
-        if (!rawJson) {
-          throw new Error(json.error || 'AI 未返回有效内容');
-        }
+        const rawContent = await readStream(res, (progressBuffer) => {
+          // 过滤掉 JSON 符号，保留人类可读文本
+          const clean = progressBuffer
+            .replace(/"\s*[a-zA-Z_]+\s*"\s*:/g, '')  // 去掉 key:
+            .replace(/[{}[\]"]/g, '')                  // 去掉括号和引号
+            .replace(/^[\s,]+/, '')                     // 去掉开头空格逗号
+            .trim();
+          if (clean.length > 10) {
+            setLiveLog(clean.slice(-200)); // 只保留最近 200 字符免卡顿
+          }
+        });
 
-        // 流结束，解析完整 JSON
+        // 流结束，此时 rawContent 已包含完整 JSON
         if (streamTimerRef.current) { clearInterval(streamTimerRef.current); streamTimerRef.current = null; }
         streamAbortRef.current = null;
 
         // 清理可能的 markdown 包裹
-        const cleaned = rawJson.replace(/^```(?:json)?\s*/, '').replace(/\s*```\s*$/, '').trim();
+        const cleaned = rawContent.replace(/^```(?:json)?\s*/, '').replace(/\s*```\s*$/, '').trim();
         try {
           analysisResult = JSON.parse(cleaned);
         } catch (_) {
@@ -991,6 +1019,22 @@ ${timestamps}
               <span className="text-xs text-slate-600">{progress}%</span>
             </div>
           </div>
+
+          {/* 实时 AI 分析日志（瀑布流打字机效果） */}
+          {phase === 'analyzing' && liveLog && (
+            <div className="mt-2 bg-zinc-900/90 backdrop-blur rounded-xl p-3 border border-yellow-500/20">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="flex h-2 w-2 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-yellow-500" />
+                </span>
+                <span className="text-[10px] text-yellow-500 font-bold uppercase tracking-widest">教练实时复盘</span>
+              </div>
+              <p className="text-xs text-zinc-300 leading-relaxed line-clamp-4 font-mono">
+                {liveLog || '正在建立长连接管道...'}
+              </p>
+            </div>
+          )}
         </div>
       )}
 

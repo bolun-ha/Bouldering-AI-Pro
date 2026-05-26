@@ -525,7 +525,14 @@ app.post("/api/analyze-stream", async (req, res) => {
       return res.status(502).json({ error: `智谱 API ${errStatus}` });
     }
 
-    // 服务端收流：读取智谱 SSE 流，只提取 delta.content
+    // 服务端收流：读取智谱 SSE 流，实时转发给前端
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
     const reader = zhipuRes.body?.getReader();
     if (!reader) {
       return res.status(502).json({ error: "无法读取响应流" });
@@ -549,9 +556,12 @@ app.post("/api/analyze-stream", async (req, res) => {
         try {
           const event = JSON.parse(dataStr);
           const delta = event.choices?.[0]?.delta?.content;
-          if (delta) fullContent += delta;
-          // 第一次收到 content 标记已解析
-          if (delta) parsed = true;
+          if (delta) {
+            fullContent += delta;
+            parsed = true;
+            // 实时转发给前端：每段文字增量
+            res.write(`data: ${JSON.stringify({ __delta: true, text: delta })}\n\n`);
+          }
         } catch { /* 跳过无法解析的行 */ }
       }
     }
@@ -569,11 +579,20 @@ app.post("/api/analyze-stream", async (req, res) => {
       finalContent = finalContent.slice(firstBrace, lastBrace + 1);
     }
 
-    // 返回纯 JSON（非 SSE）
-    res.json({ content: finalContent, parsed });
+    // 发送完整 JSON + 结束标志
+    res.write(`data: ${JSON.stringify({ __complete: true, content: finalContent, parsed })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
   } catch (error: any) {
     console.error("[analyze-stream] error:", error.message);
-    res.status(500).json({ error: error.message });
+    // 如果 headers 已经发送了，只能尝试写错误事件
+    try {
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    } catch {
+      res.status(500).json({ error: error.message });
+    }
   }
 });
 

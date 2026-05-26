@@ -466,6 +466,12 @@ ${armLines}
       console.error(`[analyze-stream] Zhipu API ${errStatus}: ${errText.slice(0, 200)}`);
       return res.status(502).json({ error: `\u667A\u8C31 API ${errStatus}` });
     }
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no"
+    });
     const reader = zhipuRes.body?.getReader();
     if (!reader) {
       return res.status(502).json({ error: "\u65E0\u6CD5\u8BFB\u53D6\u54CD\u5E94\u6D41" });
@@ -488,8 +494,13 @@ ${armLines}
         try {
           const event = JSON.parse(dataStr);
           const delta = event.choices?.[0]?.delta?.content;
-          if (delta) fullContent += delta;
-          if (delta) parsed = true;
+          if (delta) {
+            fullContent += delta;
+            parsed = true;
+            res.write(`data: ${JSON.stringify({ __delta: true, text: delta })}
+
+`);
+          }
         } catch {
         }
       }
@@ -502,10 +513,22 @@ ${armLines}
     if (firstBrace >= 0 && lastBrace > firstBrace) {
       finalContent = finalContent.slice(firstBrace, lastBrace + 1);
     }
-    res.json({ content: finalContent, parsed });
+    res.write(`data: ${JSON.stringify({ __complete: true, content: finalContent, parsed })}
+
+`);
+    res.write("data: [DONE]\n\n");
+    res.end();
   } catch (error) {
     console.error("[analyze-stream] error:", error.message);
-    res.status(500).json({ error: error.message });
+    try {
+      res.write(`data: ${JSON.stringify({ error: error.message })}
+
+`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+    } catch {
+      res.status(500).json({ error: error.message });
+    }
   }
 });
 async function startServer() {
