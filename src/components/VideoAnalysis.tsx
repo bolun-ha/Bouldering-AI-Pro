@@ -197,15 +197,32 @@ export function VideoAnalysis() {
     for (let i = 0; i < issueList.length; i++) {
       video.currentTime = issueList[i].timestamp;
       await new Promise<void>((resolve) => {
+        let done = false;
+        const timeoutId = setTimeout(() => {
+          if (done) return;
+          done = true;
+          console.warn(`[Keyframe] seek timeout at ${issueList[i].timestamp}s`);
+          captureKF();
+        }, 4000);
+
         const onSeeked = () => {
+          if (done) return;
+          done = true;
+          clearTimeout(timeoutId);
           video.removeEventListener('seeked', onSeeked);
+          captureKF();
+        };
+        video.addEventListener('seeked', onSeeked);
+
+        function captureKF() {
           requestAnimationFrame(() => {
-            ctx.drawImage(video, 0, 0, WIDTH, HEIGHT);
+            try {
+              ctx.drawImage(video, 0, 0, WIDTH, HEIGHT);
+            } catch (_) {}
             results[i] = canvas.toDataURL('image/jpeg', QUALITY);
             resolve();
           });
-        };
-        video.addEventListener('seeked', onSeeked);
+        }
       });
     }
     setKeyframes(results);
@@ -329,6 +346,8 @@ export function VideoAnalysis() {
     const duration = video.duration;
     if (!duration || !isFinite(duration)) {
       console.error('[VideoAnalysis] invalid video duration:', duration);
+      setErrorText('视频时长信息无效，请检查视频格式是否为 H.264 编码的 MP4（部分手机录制的视频格式不支持）');
+      setPhase('error');
       return;
     }
 
@@ -359,15 +378,50 @@ export function VideoAnalysis() {
     }
 
     const armSupplement: ArmSupplement[] = [];
+    const SEEK_TIMEOUT = 4000; // 移动端 Safari 兼容：4 秒超时
     for (let i = 0; i < DEFAULT_FRAME_COUNT; i++) {
       const targetTime = i * interval;
       video.currentTime = targetTime;
 
       await new Promise<void>((resolve) => {
+        let done = false;
+        const timeoutId = setTimeout(() => {
+          if (done) return;
+          done = true;
+          console.warn(`[Frame] seek timed out at ${targetTime}s, capturing anyway`);
+          captureFrame();
+        }, SEEK_TIMEOUT);
+
         const onSeeked = () => {
+          if (done) return;
+          done = true;
+          clearTimeout(timeoutId);
           video.removeEventListener('seeked', onSeeked);
+          video.removeEventListener('timeupdate', onTimeUpdate);
+          captureFrame();
+        };
+        video.addEventListener('seeked', onSeeked);
+
+        // 部分移动端浏览器 seek 不触发 seeked，用 timeupdate 兜底
+        const onTimeUpdate = () => {
+          if (done) return;
+          if (Math.abs(video.currentTime - targetTime) < 0.5) {
+            done = true;
+            clearTimeout(timeoutId);
+            video.removeEventListener('seeked', onSeeked);
+            video.removeEventListener('timeupdate', onTimeUpdate);
+            captureFrame();
+          }
+        };
+        video.addEventListener('timeupdate', onTimeUpdate);
+
+        function captureFrame() {
           requestAnimationFrame(() => {
-            ctx!.drawImage(video, 0, 0, WIDTH, HEIGHT);
+            try {
+              ctx!.drawImage(video, 0, 0, WIDTH, HEIGHT);
+            } catch (drawErr) {
+              console.warn('[Frame] drawImage error at', targetTime, drawErr);
+            }
             const dataUrl = canvas.toDataURL('image/jpeg', QUALITY);
             const base64 = dataUrl.replace(/^data:image\/jpeg;base64,/, '');
             extracted.push({ base64, timestamp: targetTime });
@@ -421,8 +475,7 @@ export function VideoAnalysis() {
             setProgress(5 + Math.round((i + 1) / DEFAULT_FRAME_COUNT * 40));
             resolve();
           });
-        };
-        video.addEventListener('seeked', onSeeked);
+        }
       });
     }
 
