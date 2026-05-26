@@ -1,5 +1,5 @@
 // POST /.netlify/functions/analyze-stream — Multi-frame analysis via GLM-5V-Turbo (Netlify)
-import { zhipuChat, extractJSON, corsHeaders, handleOptions } from "./_shared.mjs";
+import { zhipuChat, corsHeaders, handleOptions } from "./_shared.mjs";
 
 const STREAM_SYSTEM_PROMPT = `# Role
 你是一名国家级专业抱石攀岩教练兼比赛主裁判。请分析输入的攀岩截图，进行深度、连贯的复盘。
@@ -61,11 +61,12 @@ export async function handler(event) {
     const text = await zhipuChat(
       "glm-5v-turbo",
       [{ role: "user", content: contentArray }],
-      null, // system already in user content
+      null,
     );
 
-    const result = extractJSON(text);
-    return { statusCode: 200, headers: corsHeaders, body: JSON.stringify(result) };
+    // 保持与 server.ts 一致的返回格式：{ content: "完整JSON字符串" }
+    // 前端通过 res.json() → .content → JSON.parse 消费
+    return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ content: text }) };
   } catch (error) {
     console.error("analyze-stream Error:", error.message);
     return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: error.message }) };
