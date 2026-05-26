@@ -201,8 +201,36 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
     }
   }
 
+  // ─── 7. 限制最大显示标注数 ─────────────────────────────────────
+  // 手机屏幕小，标注太多反而看不清。策略：最多 4 个，error 优先 + warning 补满
+  const MAX_MARKERS = 4;
+  const errors = markers.filter(m => m.type === 'error');
+  const warnings = markers.filter(m => m.type === 'warning');
+
+  // 去重：同一身体部位产出的同类型标注只保留第一个
+  const dedupedWarnings: Marker[] = [];
+  const seenLabels = new Set(errors.map(m => m.label));
+  for (const w of warnings) {
+    if (!seenLabels.has(w.label)) {
+      dedupedWarnings.push(w);
+      seenLabels.add(w.label);
+    }
+  }
+
+  const finalMarkers: Marker[] = [];
+  // 先填 error
+  for (const e of errors) {
+    if (finalMarkers.length >= MAX_MARKERS) break;
+    finalMarkers.push(e);
+  }
+  // 再填 warning 补满
+  for (const w of dedupedWarnings) {
+    if (finalMarkers.length >= MAX_MARKERS) break;
+    finalMarkers.push(w);
+  }
+
   return {
-    markers,
+    markers: finalMarkers,
     angles: angleLogs.join(', '),
   };
 }
