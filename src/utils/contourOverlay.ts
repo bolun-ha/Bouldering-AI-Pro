@@ -101,7 +101,7 @@ export function applyContourOverlay(
   threshold = 0.15,
   color = '#ff6600',
 ): void {
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return;
 
   const w = canvas.width;

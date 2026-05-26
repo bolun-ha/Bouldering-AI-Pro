@@ -158,7 +158,7 @@ export default function App() {
           const aspect = video.videoHeight / video.videoWidth;
           thumbCanvas.width = 320;
           thumbCanvas.height = Math.round(320 * aspect);
-          const thumbCtx = thumbCanvas.getContext('2d');
+          const thumbCtx = thumbCanvas.getContext('2d', { willReadFrequently: true });
           if (thumbCtx) {
             thumbCtx.drawImage(video, 0, 0, thumbCanvas.width, thumbCanvas.height);
             // 画 AI 标注

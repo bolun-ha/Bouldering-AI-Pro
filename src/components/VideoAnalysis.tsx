@@ -189,7 +189,7 @@ export function VideoAnalysis() {
     const video = videoRef.current;
     const canvas = extractCanvasRef.current;
     if (!video || !canvas || issueList.length === 0) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
     const { WIDTH, HEIGHT, QUALITY } = FRAME_CONFIG;
@@ -372,7 +372,7 @@ export function VideoAnalysis() {
     // 1. 计算抽帧间隔
     const interval = duration / DEFAULT_FRAME_COUNT;
     const extracted: ExtractedFrame[] = [];
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
     const { WIDTH, HEIGHT, QUALITY } = FRAME_CONFIG;
@@ -733,7 +733,7 @@ ${timestamps}
     const canvas = bboxOverlayRef.current;
     const video = videoRef.current;
     if (!canvas || !video) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
     // 匹配 canvas 尺寸到视频实际渲染尺寸

@@ -168,7 +168,7 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
     const scale = Math.min(1280 / (video.videoWidth || 1280), 720 / (video.videoHeight || 720));
     canvas.width = Math.round((video.videoWidth || 1280) * scale);
     canvas.height = Math.round((video.videoHeight || 720) * scale);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
