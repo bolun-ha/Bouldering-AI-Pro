@@ -646,16 +646,35 @@ ${timestamps}
             const repaired = repairJSON(cleaned);
             analysisResult = JSON.parse(repaired);
           } catch (_e) {
-            const fallbackMatch = cleaned.match(/\"climb_result\"\s*:\s*\"(SUCCESS|FAIL|UNKNOWN)\"/);
-            const scoreMatch = cleaned.match(/\"overall_score\"\s*:\s*(\d+)/);
-            const summaryMatch = cleaned.match(/\"summary\"\s*:\s*\"([^"]+?)\"(?=\s*[,}])/);
+            // 记录原始输出以便调试
+            console.warn('[AI parse] 原始输出 (首1500字符):', cleaned.slice(0, 1500));
+            // 更全面的 fallback regex: 尝试提取所有可识别的字段
+            const climbResult = cleaned.match(/["']climb_result["']\s*:\s*["'](SUCCESS|FAIL|UNKNOWN)["']/i);
+            const overallScore = cleaned.match(/["']overall_score["']\s*:\s*(\d+)/i);
+            const summary = cleaned.match(/["']summary["']\s*:\s*["']([^"']+?)["'](?=\s*[,}])/i);
+            const trend = cleaned.match(/["']trend["']\s*:\s*["']([^"']+?)["'](?=\s*[,}])/i);
+            // 提取 issues 数组（如果有）
+            let issues: any[] = [];
+            try {
+              const issuesMatch = cleaned.match(/["']issues["']\s*:\s*\[([\s\S]*?)\](?=\s*[,}]\s*["'](?:strengths|weaknesses|improvements|phases|summary))/i);
+              if (issuesMatch) {
+                // 尝试解析 issues 子项（可能格式不完整，但逐个提取 timestamp/description）
+                const issueItems = issuesMatch[1].match(/\{[^}]+\}/g) || [];
+                issues = issueItems.map((item) => {
+                  const ts = parseFloat(item.match(/["']timestamp["']\s*:\s*([\d.]+)/i)?.[1] || '0');
+                  const desc = item.match(/["']description["']\s*:\s*["']([^"']+?)["']/i)?.[1] || '';
+                  return { timestamp: ts, description: desc, type: 'warning' };
+                }).filter((i: any) => i.description);
+              }
+            } catch { /* 忽略 issues 解析失败 */ }
             analysisResult = {
-              climb_result: (fallbackMatch?.[1] as any) || 'UNKNOWN',
-              end_game_reason: 'AI 输出格式异常，请重试',
-              overall_score: scoreMatch ? parseInt(scoreMatch[1]) : 50,
-              summary: summaryMatch?.[1] || '分析完成',
+              climb_result: (climbResult?.[1] as any) || 'UNKNOWN',
+              end_game_reason: issues.length > 0 ? '' : 'AI 输出格式异常，请重试',
+              overall_score: overallScore ? parseInt(overallScore[1]) : 50,
+              summary: summary?.[1] || '分析完成',
+              trend: trend?.[1] || 'unknown',
               sequence_analysis: '',
-              issues: [],
+              issues,
               phases: [],
               strengths: [],
               weaknesses: [],

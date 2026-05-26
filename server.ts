@@ -549,8 +549,19 @@ app.post("/api/analyze-stream", async (req, res) => {
 
     console.log(`[analyze-stream] 流式完成, 收到 ${fullContent.length} 字符, 已解析=${parsed}`);
 
+    // 尝试提取 JSON（AI 有时会在 JSON 前后加额外说明文字）
+    let finalContent = fullContent.trim();
+    // 去掉 markdown 代码块包裹
+    finalContent = finalContent.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+    // 提取 { ... } 之间的部分
+    const firstBrace = finalContent.indexOf('{');
+    const lastBrace = finalContent.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      finalContent = finalContent.slice(firstBrace, lastBrace + 1);
+    }
+
     // 返回纯 JSON（非 SSE）
-    res.json({ content: fullContent, parsed });
+    res.json({ content: finalContent, parsed });
   } catch (error: any) {
     console.error("[analyze-stream] error:", error.message);
     res.status(500).json({ error: error.message });
