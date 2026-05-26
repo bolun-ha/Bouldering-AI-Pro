@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import crypto from "crypto";
@@ -558,7 +559,11 @@ app.post("/api/analyze-stream", async (req, res) => {
 
 // ─── Vite dev server / static serve ─────────────────────────────
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
+  // 自动判断：server.cjs 在 dist/ 目录下时，index.html 就在同目录
+  const isProduction = process.env.NODE_ENV === "production" ||
+    fs.existsSync(path.join(__dirname, "index.html"));
+
+  if (!isProduction) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
