@@ -556,70 +556,120 @@ ${timestamps}
         setProgress(Math.round(pct));
       }, 1000);
 
-      const controller = new AbortController();
-      streamAbortRef.current = controller;
+      // ── 重试逻辑：504/超时后自动减帧重试 ──
+      let retryCount = 0;
+      const maxRetries = 2; // 最多重试2次（10帧→6帧→4帧）
+      const frameCounts = [DEFAULT_FRAME_COUNT, 6, 4];
+      let analysisResult: VideoAnalysisResult | null = null;
 
-      const res = await fetch('/api/analyze-stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          frames: extracted,
-          prompt,
-          model: 'glm-5v-turbo',
-          motion_metadata: armSupplement.length > 0
-            ? { arm_analysis_supplement: armSupplement }
-            : undefined,
-        }),
-      });
+      while (retryCount <= maxRetries && !analysisResult) {
+        const framesToUse = retryCount === 0
+          ? extracted
+          : extracted.filter((_, i) => Math.round(i / (extracted.length / frameCounts[retryCount])) !== Math.round((i - 1) / (extracted.length / frameCounts[retryCount])))
+            ? extracted.filter((_, i) => {
+                // 均匀采样：从 N 帧选中 M 帧
+                const total = extracted.length;
+                const target = frameCounts[retryCount];
+                const ratio = total / target;
+                return Math.floor(i / ratio) !== Math.floor((i - 1) / ratio);
+              })
+            : extracted.slice(0, frameCounts[retryCount]);
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `提交失败 HTTP ${res.status}`);
-      }
+        // 确保帧数正确
+        let sampled: typeof extracted;
+        if (retryCount === 0) {
+          sampled = extracted;
+        } else {
+          const targetCount = frameCounts[retryCount];
+          const step = Math.max(1, Math.floor(extracted.length / targetCount));
+          sampled = extracted.filter((_, i) => i % step === 0);
+          if (sampled.length > targetCount) sampled = sampled.slice(0, targetCount);
+        }
 
-      // 读取流
-      setStatusText('AI 教练正在实时看片...');
-      const json = await res.json();
-      const rawJson = json.content || '';
+        if (retryCount > 0) {
+          setStatusText(`提交超时，使用 ${sampled.length} 帧重试...`);
+          // 重置进度条
+          elapsedSec = 0;
+        }
 
-      if (!rawJson) {
-        throw new Error(json.error || 'AI 未返回有效内容');
-      }
-
-      // 流结束，解析完整 JSON
-      if (streamTimerRef.current) { clearInterval(streamTimerRef.current); streamTimerRef.current = null; }
-      streamAbortRef.current = null;
-
-      // 清理可能的 markdown 包裹
-      const cleaned = rawJson.replace(/^```(?:json)?\s*/, '').replace(/\s*```\s*$/, '').trim();
-      let analysisResult: VideoAnalysisResult = {} as VideoAnalysisResult;
-      try {
-        analysisResult = JSON.parse(cleaned);
-      } catch (_) {
         try {
-          // jsonrepair 修复
-          const repaired = repairJSON(cleaned);
-          analysisResult = JSON.parse(repaired);
-        } catch (_e) {
-          // 终极兜底：手动尝试提取关键字段
-          const fallbackMatch = cleaned.match(/\"climb_result\"\s*:\s*\"(SUCCESS|FAIL|UNKNOWN)\"/);
-          const scoreMatch = cleaned.match(/\"overall_score\"\s*:\s*(\d+)/);
-          const summaryMatch = cleaned.match(/\"summary\"\s*:\s*\"([^"]+?)\"(?=\s*[,}])/);
-          analysisResult = {
-            climb_result: (fallbackMatch?.[1] as any) || 'UNKNOWN',
-            end_game_reason: 'AI 输出格式异常，请重试',
-            overall_score: scoreMatch ? parseInt(scoreMatch[1]) : 50,
-            summary: summaryMatch?.[1] || '分析完成',
-            sequence_analysis: '',
-            issues: [],
-            phases: [],
-            strengths: [],
-            weaknesses: [],
-            improvements: [],
-          } as VideoAnalysisResult;
+          const controller = new AbortController();
+          streamAbortRef.current = controller;
+
+          const res = await fetch('/api/analyze-stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+              frames: sampled,
+              prompt,
+              model: 'glm-5v-turbo',
+              motion_metadata: armSupplement.length > 0
+                ? { arm_analysis_supplement: armSupplement }
+                : undefined,
+            }),
+          });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            // 504 → 重试（减帧）
+            if (res.status === 504 && retryCount < maxRetries) {
+              retryCount++;
+              continue;
+            }
+            throw new Error(err.error || `提交失败 HTTP ${res.status}`);
+          }
+
+          // 读取流
+          const json = await res.json();
+          const rawJson = json.content || '';
+
+          if (!rawJson) {
+            throw new Error(json.error || 'AI 未返回有效内容');
+          }
+
+          // 流结束，解析完整 JSON
+          if (streamTimerRef.current) { clearInterval(streamTimerRef.current); streamTimerRef.current = null; }
+          streamAbortRef.current = null;
+
+          // 清理可能的 markdown 包裹
+          const cleaned = rawJson.replace(/^```(?:json)?\s*/, '').replace(/\s*```\s*$/, '').trim();
+          try {
+            analysisResult = JSON.parse(cleaned);
+          } catch (_) {
+            try {
+              const repaired = repairJSON(cleaned);
+              analysisResult = JSON.parse(repaired);
+            } catch (_e) {
+              const fallbackMatch = cleaned.match(/\"climb_result\"\s*:\s*\"(SUCCESS|FAIL|UNKNOWN)\"/);
+              const scoreMatch = cleaned.match(/\"overall_score\"\s*:\s*(\d+)/);
+              const summaryMatch = cleaned.match(/\"summary\"\s*:\s*\"([^"]+?)\"(?=\s*[,}])/);
+              analysisResult = {
+                climb_result: (fallbackMatch?.[1] as any) || 'UNKNOWN',
+                end_game_reason: 'AI 输出格式异常，请重试',
+                overall_score: scoreMatch ? parseInt(scoreMatch[1]) : 50,
+                summary: summaryMatch?.[1] || '分析完成',
+                sequence_analysis: '',
+                issues: [],
+                phases: [],
+                strengths: [],
+                weaknesses: [],
+                improvements: [],
+              } as VideoAnalysisResult;
+            }
+          }
+        } catch (e) {
+          // 如果是 504/超时 且还可以重试
+          const isTimeout = (e as any)?.message?.includes('504') || (e as any)?.message?.includes('timeout') || (e as any)?.message?.includes('ETIMEDOUT');
+          if (isTimeout && retryCount < maxRetries) {
+            retryCount++;
+            continue;
+          }
+          throw e; // 非超时错误或已用完重试次数，向上抛
         }
       }
+
+      if (!analysisResult) throw new Error('分析失败');
 
       setResult(analysisResult);
       setIssues(analysisResult?.issues || []);
