@@ -651,29 +651,33 @@ ${timestamps}
           } catch (_e) {
             // 记录原始输出以便调试
             console.warn('[AI parse] 原始输出 (首1500字符):', cleaned.slice(0, 1500));
-            // 暴力搜索：尝试在所有 {…} 位置解析，找不到就逐个字段 regex
+            // 暴力搜索：遍历文本中所有 {…} 片段，逐一尝试解析
+            // 优先找包含 climb_result 的根对象，其次是逐个子对象
             let extractedFromBraces: any = null;
-            let braceStart = 0;
-            while (!extractedFromBraces && braceStart >= 0) {
-              braceStart = cleaned.indexOf('{', braceStart);
-              if (braceStart < 0) break;
-              const braceEnd = cleaned.indexOf('}', braceStart);
-              if (braceEnd < 0) break;
-              const candidate = cleaned.slice(braceStart, braceEnd + 1);
-              try {
-                extractedFromBraces = JSON.parse(candidate);
-                break;
-              } catch {
-                try {
-                  extractedFromBraces = JSON.parse(repairJSON(candidate));
-                  break;
-                } catch {
-                  braceStart = braceStart + 1;
-                }
-              }
+            const braceCandidates: string[] = [];
+            let i = 0;
+            while (i >= 0) {
+              const a = cleaned.indexOf('{', i);
+              if (a < 0) break;
+              const b = cleaned.indexOf('}', a);
+              if (b < 0) break;
+              braceCandidates.push(repairJSON(cleaned.slice(a, b + 1)));
+              i = a + 1;
             }
-            // 如果暴力搜索解析成功，用它的字段补全默认值
-            if (extractedFromBraces && typeof extractedFromBraces === 'object') {
+            // 从大到小排序（根对象最长，优先匹配 climb_result）
+            braceCandidates.sort((a, b) => b.length - a.length);
+            for (const cand of braceCandidates) {
+              try {
+                const parsed = JSON.parse(cand);
+                if (parsed && typeof parsed === 'object') {
+                  if (parsed.climb_result || parsed.overall_score || parsed.phases) {
+                    extractedFromBraces = parsed;
+                    break;
+                  }
+                }
+              } catch { /* 跳过 */ }
+            }
+            if (extractedFromBraces && extractedFromBraces.climb_result) {
               analysisResult = {
                 climb_result: extractedFromBraces.climb_result || 'UNKNOWN',
                 overall_score: extractedFromBraces.overall_score ?? 50,
