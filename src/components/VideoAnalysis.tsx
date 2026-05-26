@@ -120,6 +120,7 @@ export function VideoAnalysis() {
   // ── 流式读取（替代异步轮询） ──
   const streamAbortRef = useRef<AbortController | null>(null);
   const streamTimerRef = useRef<number | null>(null);
+  const isSubmittingRef = useRef(false); // 📌 防并发锁
 
   const readStream = useCallback(async (
     response: Response,
@@ -379,6 +380,7 @@ export function VideoAnalysis() {
 
     const armSupplement: ArmSupplement[] = [];
     const SEEK_TIMEOUT = 4000; // 移动端 Safari 兼容：4 秒超时
+    let lastMediaPipeTimestamp = -1; // 📌 强制 MediaPipe 时间戳单调递增
     for (let i = 0; i < DEFAULT_FRAME_COUNT; i++) {
       const targetTime = i * interval;
       video.currentTime = targetTime;
@@ -429,7 +431,14 @@ export function VideoAnalysis() {
             // ── 骨骼检测：提取手臂角度 ──
             if (poseEngineReady && video.videoWidth > 0 && video.videoHeight > 0) {
               try {
-                const pose = detectPose(video, targetTime * 1000, {
+                // 📌 MediaPipe 要求时间戳严格单调递增，超时兜底可能导致倒流
+                let mpTimestamp = Math.round(targetTime * 1000);
+                if (mpTimestamp <= lastMediaPipeTimestamp) {
+                  mpTimestamp = lastMediaPipeTimestamp + 1;
+                }
+                lastMediaPipeTimestamp = mpTimestamp;
+
+                const pose = detectPose(video, mpTimestamp, {
                   width: video.videoWidth,
                   height: video.videoHeight,
                 });
@@ -556,117 +565,81 @@ ${timestamps}
         setProgress(Math.round(pct));
       }, 1000);
 
-      // ── 重试逻辑：504/超时后自动减帧重试 ──
-      let retryCount = 0;
-      const maxRetries = 2; // 最多重试2次（10帧→6帧→4帧）
-      const frameCounts = [DEFAULT_FRAME_COUNT, 6, 4];
+      // 📌 防并发锁：同一时间只允许一次提交
+      if (isSubmittingRef.current) {
+        throw new Error('已有分析请求在进行中');
+      }
+      isSubmittingRef.current = true;
+
+      const controller = new AbortController();
+      streamAbortRef.current = controller;
+
       let analysisResult: VideoAnalysisResult | null = null;
 
-      while (retryCount <= maxRetries && !analysisResult) {
-        const framesToUse = retryCount === 0
-          ? extracted
-          : extracted.filter((_, i) => Math.round(i / (extracted.length / frameCounts[retryCount])) !== Math.round((i - 1) / (extracted.length / frameCounts[retryCount])))
-            ? extracted.filter((_, i) => {
-                // 均匀采样：从 N 帧选中 M 帧
-                const total = extracted.length;
-                const target = frameCounts[retryCount];
-                const ratio = total / target;
-                return Math.floor(i / ratio) !== Math.floor((i - 1) / ratio);
-              })
-            : extracted.slice(0, frameCounts[retryCount]);
+      try {
+        const res = await fetch('/api/analyze-stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            frames: extracted,
+            prompt,
+            model: 'glm-5v-turbo',
+            motion_metadata: armSupplement.length > 0
+              ? { arm_analysis_supplement: armSupplement }
+              : undefined,
+          }),
+        });
 
-        // 确保帧数正确
-        let sampled: typeof extracted;
-        if (retryCount === 0) {
-          sampled = extracted;
-        } else {
-          const targetCount = frameCounts[retryCount];
-          const step = Math.max(1, Math.floor(extracted.length / targetCount));
-          sampled = extracted.filter((_, i) => i % step === 0);
-          if (sampled.length > targetCount) sampled = sampled.slice(0, targetCount);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          if (res.status === 504) {
+            throw new Error('Netlify 服务器超时（10秒限制）。请使用本地开发环境 (localhost:3001) 或稍后重试。部署版不支持 10 帧以上分析。');
+          }
+          throw new Error(err.error || `提交失败 HTTP ${res.status}`);
         }
 
-        if (retryCount > 0) {
-          setStatusText(`提交超时，使用 ${sampled.length} 帧重试...`);
-          // 重置进度条
-          elapsedSec = 0;
+        // 读取流
+        setStatusText('AI 教练正在实时看片...');
+        const json = await res.json();
+        const rawJson = json.content || '';
+
+        if (!rawJson) {
+          throw new Error(json.error || 'AI 未返回有效内容');
         }
 
+        // 流结束，解析完整 JSON
+        if (streamTimerRef.current) { clearInterval(streamTimerRef.current); streamTimerRef.current = null; }
+        streamAbortRef.current = null;
+
+        // 清理可能的 markdown 包裹
+        const cleaned = rawJson.replace(/^```(?:json)?\s*/, '').replace(/\s*```\s*$/, '').trim();
         try {
-          const controller = new AbortController();
-          streamAbortRef.current = controller;
-
-          const res = await fetch('/api/analyze-stream', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            signal: controller.signal,
-            body: JSON.stringify({
-              frames: sampled,
-              prompt,
-              model: 'glm-5v-turbo',
-              motion_metadata: armSupplement.length > 0
-                ? { arm_analysis_supplement: armSupplement }
-                : undefined,
-            }),
-          });
-
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            // 504 → 重试（减帧）
-            if (res.status === 504 && retryCount < maxRetries) {
-              retryCount++;
-              continue;
-            }
-            throw new Error(err.error || `提交失败 HTTP ${res.status}`);
-          }
-
-          // 读取流
-          const json = await res.json();
-          const rawJson = json.content || '';
-
-          if (!rawJson) {
-            throw new Error(json.error || 'AI 未返回有效内容');
-          }
-
-          // 流结束，解析完整 JSON
-          if (streamTimerRef.current) { clearInterval(streamTimerRef.current); streamTimerRef.current = null; }
-          streamAbortRef.current = null;
-
-          // 清理可能的 markdown 包裹
-          const cleaned = rawJson.replace(/^```(?:json)?\s*/, '').replace(/\s*```\s*$/, '').trim();
+          analysisResult = JSON.parse(cleaned);
+        } catch (_) {
           try {
-            analysisResult = JSON.parse(cleaned);
-          } catch (_) {
-            try {
-              const repaired = repairJSON(cleaned);
-              analysisResult = JSON.parse(repaired);
-            } catch (_e) {
-              const fallbackMatch = cleaned.match(/\"climb_result\"\s*:\s*\"(SUCCESS|FAIL|UNKNOWN)\"/);
-              const scoreMatch = cleaned.match(/\"overall_score\"\s*:\s*(\d+)/);
-              const summaryMatch = cleaned.match(/\"summary\"\s*:\s*\"([^"]+?)\"(?=\s*[,}])/);
-              analysisResult = {
-                climb_result: (fallbackMatch?.[1] as any) || 'UNKNOWN',
-                end_game_reason: 'AI 输出格式异常，请重试',
-                overall_score: scoreMatch ? parseInt(scoreMatch[1]) : 50,
-                summary: summaryMatch?.[1] || '分析完成',
-                sequence_analysis: '',
-                issues: [],
-                phases: [],
-                strengths: [],
-                weaknesses: [],
-                improvements: [],
-              } as VideoAnalysisResult;
-            }
+            const repaired = repairJSON(cleaned);
+            analysisResult = JSON.parse(repaired);
+          } catch (_e) {
+            const fallbackMatch = cleaned.match(/\"climb_result\"\s*:\s*\"(SUCCESS|FAIL|UNKNOWN)\"/);
+            const scoreMatch = cleaned.match(/\"overall_score\"\s*:\s*(\d+)/);
+            const summaryMatch = cleaned.match(/\"summary\"\s*:\s*\"([^"]+?)\"(?=\s*[,}])/);
+            analysisResult = {
+              climb_result: (fallbackMatch?.[1] as any) || 'UNKNOWN',
+              end_game_reason: 'AI 输出格式异常，请重试',
+              overall_score: scoreMatch ? parseInt(scoreMatch[1]) : 50,
+              summary: summaryMatch?.[1] || '分析完成',
+              sequence_analysis: '',
+              issues: [],
+              phases: [],
+              strengths: [],
+              weaknesses: [],
+              improvements: [],
+            } as VideoAnalysisResult;
           }
-        } catch (e) {
-          // 如果是 504/超时 且还可以重试
-          const isTimeout = (e as any)?.message?.includes('504') || (e as any)?.message?.includes('timeout') || (e as any)?.message?.includes('ETIMEDOUT');
-          if (isTimeout && retryCount < maxRetries) {
-            retryCount++;
-            continue;
-          }
-          throw e; // 非超时错误或已用完重试次数，向上抛
         }
+      } finally {
+        isSubmittingRef.current = false;
       }
 
       if (!analysisResult) throw new Error('分析失败');
