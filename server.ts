@@ -504,16 +504,25 @@ app.post("/api/analyze-stream", async (req, res) => {
       stream: true,
     };
 
-    const zhipuRes = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
-      method: "POST",
-      headers: zhipuHeaders(),
-      body: JSON.stringify(body),
-    });
+    // 智谱 429 重试（指数退避，最多 3 次）
+    let zhipuRes: Response | null = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      zhipuRes = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
+        method: "POST",
+        headers: zhipuHeaders(),
+        body: JSON.stringify(body),
+      });
+      if (zhipuRes.ok || zhipuRes.status !== 429) break;
+      const waitMs = Math.min(2e3 * Math.pow(2, attempt - 1), 8e3);
+      console.warn(`[analyze-stream] 智谱 429 限流 (attempt ${attempt}/3), 等待 ${waitMs}ms`);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
 
-    if (!zhipuRes.ok) {
-      const errText = await zhipuRes.text().catch(() => '');
-      console.error(`[analyze-stream] Zhipu API ${zhipuRes.status}: ${errText.slice(0, 200)}`);
-      return res.status(502).json({ error: `智谱 API ${zhipuRes.status}` });
+    if (!zhipuRes || !zhipuRes.ok) {
+      const errStatus = zhipuRes?.status ?? 0;
+      const errText = zhipuRes ? await zhipuRes.text().catch(() => '') : '';
+      console.error(`[analyze-stream] Zhipu API ${errStatus}: ${errText.slice(0, 200)}`);
+      return res.status(502).json({ error: `智谱 API ${errStatus}` });
     }
 
     // 服务端收流：读取智谱 SSE 流，只提取 delta.content

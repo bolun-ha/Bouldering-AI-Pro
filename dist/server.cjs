@@ -448,15 +448,23 @@ ${armLines}
       messages: [{ role: "user", content: contentArray }],
       stream: true
     };
-    const zhipuRes = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
-      method: "POST",
-      headers: zhipuHeaders(),
-      body: JSON.stringify(body)
-    });
-    if (!zhipuRes.ok) {
-      const errText = await zhipuRes.text().catch(() => "");
-      console.error(`[analyze-stream] Zhipu API ${zhipuRes.status}: ${errText.slice(0, 200)}`);
-      return res.status(502).json({ error: `\u667A\u8C31 API ${zhipuRes.status}` });
+    let zhipuRes = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      zhipuRes = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
+        method: "POST",
+        headers: zhipuHeaders(),
+        body: JSON.stringify(body)
+      });
+      if (zhipuRes.ok || zhipuRes.status !== 429) break;
+      const waitMs = Math.min(2e3 * Math.pow(2, attempt - 1), 8e3);
+      console.warn(`[analyze-stream] \u667A\u8C31 429 \u9650\u6D41 (attempt ${attempt}/3), \u7B49\u5F85 ${waitMs}ms`);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+    if (!zhipuRes || !zhipuRes.ok) {
+      const errStatus = zhipuRes?.status ?? 0;
+      const errText = zhipuRes ? await zhipuRes.text().catch(() => "") : "";
+      console.error(`[analyze-stream] Zhipu API ${errStatus}: ${errText.slice(0, 200)}`);
+      return res.status(502).json({ error: `\u667A\u8C31 API ${errStatus}` });
     }
     const reader = zhipuRes.body?.getReader();
     if (!reader) {
