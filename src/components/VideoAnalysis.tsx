@@ -942,15 +942,18 @@ ${timestamps}
         <div className="w-full px-4 pt-4">
           <div className="relative bg-slate-900 rounded-2xl overflow-hidden border border-slate-800">
             <video
+              key={videoUrl} // iOS Safari: blob URL 变更时强制重新挂载
               ref={videoRef}
-              src={videoUrl || undefined}
+              preload="metadata"
               onLoadedMetadata={handleMetadata}
               onTimeUpdate={handleTimeUpdate}
               className="w-full aspect-video object-contain bg-black"
               playsInline
               controls={phase === 'done' || phase === 'idle'}
               onClick={phase === 'done' ? togglePlay : undefined}
-            />
+            >
+              {videoUrl && <source src={videoUrl} />}
+            </video>
             {/* BBox 叠加层 */}
             <canvas
               ref={bboxOverlayRef}
