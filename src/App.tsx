@@ -268,42 +268,42 @@ export default function App() {
       <QRPopover isOpen={showQR} onClose={() => setShowQR(false)} xiaohongshuQR="/xiaohongshu-qr.png" />
       <div className="relative h-screen w-screen bg-slate-950 font-sans text-slate-200 overflow-hidden flex flex-col">
       {/* Mobile-First Header */}
-      <header className="absolute top-0 inset-x-0 h-16 bg-gradient-to-b from-slate-950/80 to-transparent flex items-center justify-between px-6 z-40 backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <button id="b-logo" onClick={() => setShowQR(true)} className="w-8 h-8 bg-orange-600 rounded-lg flex items-center justify-center text-white font-black italic shadow-lg shadow-orange-600/20 hover:bg-orange-500 active:scale-90 transition-all">B</button>
-          <h1 className="text-sm font-black tracking-tighter text-white uppercase italic">抱石 AI <span className="text-orange-500">专业版</span></h1>
+      <header className="absolute top-0 inset-x-0 h-14 bg-gradient-to-b from-slate-950/80 to-transparent flex items-center justify-between px-4 z-40 backdrop-blur-sm">
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button id="b-logo" onClick={() => setShowQR(true)} className="w-7 h-7 bg-orange-600 rounded-lg flex items-center justify-center text-white font-black italic shadow-lg shadow-orange-600/20 hover:bg-orange-500 active:scale-90 transition-all text-xs">B</button>
+          <h1 className="text-[11px] font-black tracking-tighter text-white uppercase italic leading-none">抱石 AI <span className="text-orange-500">专业版</span></h1>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 flex-shrink-0">
           {/* Mode Toggle */}
-          <div className="flex bg-slate-900 rounded-xl p-0.5 border border-slate-800">
+          <div className="flex bg-slate-900 rounded-lg p-0.5 border border-slate-800">
             <button
               onClick={() => setMode('camera')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[9px] font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
                 mode === 'camera'
                   ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/20'
                   : 'text-slate-500 hover:text-slate-300'
               }`}
             >
-              <Camera className="w-3 h-3" /> 实时
+              <Camera className="w-2.5 h-2.5" /> 实时
             </button>
             <button
               onClick={() => setMode('video')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[9px] font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
                 mode === 'video'
                   ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/20'
                   : 'text-slate-500 hover:text-slate-300'
               }`}
             >
-              <Video className="w-3 h-3" /> 视频
+              <Video className="w-2.5 h-2.5" /> 视频
             </button>
           </div>
-          <div className="flex flex-col items-end">
+          <div className="hidden sm:flex flex-col items-end">
             <span className="text-[8px] text-slate-500 uppercase font-black">云端延迟</span>
             <span className="text-[10px] font-mono text-emerald-400">1.2s</span>
           </div>
-          <div className="h-4 w-px bg-slate-800"></div>
-          <div className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-500'}`} />
+          <div className="hidden sm:block h-3 w-px bg-slate-800"></div>
+          <div className={`w-1.5 h-1.5 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-500'}`} />
         </div>
       </header>
 
