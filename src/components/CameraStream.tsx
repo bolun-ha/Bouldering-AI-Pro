@@ -6,6 +6,8 @@
  * 2. 按间隔截帧（~2s）传给 AI 分析（含骨骼+手势数据）
  * 3. 运行 MediaPipe Pose(~15fps) + Hands(~10fps)
  * 4. 规则引擎实时输出姿态标记
+ * 5. 帧缓冲区（持续保存最近帧 + 骨骼数据）
+ * 6. 卡关检测（3秒无纵向位移）和掉落检测
  */
 import React, { useRef, useEffect, useCallback } from 'react';
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
@@ -15,10 +17,21 @@ import {
   detectHands,
   landmarksToSnapshot,
   handLandmarksToSnapshot,
+  LANDMARK,
 } from '../utils/poseEngine';
 import { applyContourOverlay } from '../utils/contourOverlay';
 import { analyzePose } from '../utils/poseRules';
 import type { Marker, HandResult } from '../types';
+
+/** 帧缓冲区条目 */
+interface FrameBufferEntry {
+  timestamp: number;
+  base64: string;
+  poseSnapshot: string;
+  handSnapshot: string;
+  /** 髋部中心 Y 坐标（归一化 0-1） */
+  hipCenterY: number;
+}
 
 // 临时 HandResult 类型，避免跨文件依赖
 interface HandRes {
@@ -31,6 +44,10 @@ interface CameraStreamProps {
   onFrame: (canvas: HTMLCanvasElement, poseSnapshot: string, handSnapshot: string) => void;
   /** 实时姿态标记回调（MediaPipe 规则引擎输出） */
   onPoseMarkers?: (markers: Marker[], landmarks: NormalizedLandmark[], hands?: HandRes[]) => void;
+  /** 卡关时触发：传入缓冲区帧供 5v 分析 */
+  onStuck?: (buffer: FrameBufferEntry[]) => void;
+  /** 掉落时触发：传入缓冲区帧供自动复盘 */
+  onFall?: (buffer: FrameBufferEntry[]) => void;
   isRecording: boolean;
   captureInterval?: number;
   onError?: (error: string) => void;
@@ -40,6 +57,8 @@ interface CameraStreamProps {
 export const CameraStream: React.FC<CameraStreamProps> = ({
   onFrame,
   onPoseMarkers,
+  onStuck,
+  onFall,
   isRecording,
   captureInterval = 2000,
   onError,
@@ -50,6 +69,23 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
   const poseLandmarksRef = useRef<NormalizedLandmark[]>([]);
   const handResultsRef = useRef<HandRes[]>([]);
   const poseActiveRef = useRef(false);
+
+  // ─── 帧缓冲区（供卡关/掉落触发时截取） ────────────────────
+  const frameBufferRef = useRef<FrameBufferEntry[]>([]);
+  const FRAME_BUFFER_SECONDS = 8; // 保留最近 8 秒
+  const FRAME_BUFFER_INTERVAL = 1200; // ~0.8fps
+  const STUCK_Y_THRESHOLD = 0.008; // Y 轴变化 < 0.8% 视为静止
+  const STUCK_TIME_MS = 3000;     // 持续 3 秒视为卡关
+  const FALL_Y_DROP = 0.15;       // Y 快速下降 > 15%
+
+  // 卡关状态机
+  const stillTimerRef = useRef<number>(0);  // 持续静止的毫秒数
+  const lastHipYRef = useRef<number>(-1);   // 上次有效髋部 Y
+  const stuckTriggeredRef = useRef(false);  // 已触发卡关提示（防重复）
+  const lastStuckTimestampRef = useRef(0);  // 最后卡关触发时间
+
+  // 掉落状态机
+  const fallTriggeredRef = useRef(false);
 
   // ─── 摄像头初始化 ──────────────────────────────────────────
   useEffect(() => {
@@ -105,8 +141,56 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
     let rafId = 0;
     let lastPoseTime = 0;
     let lastHandTime = 0;
+    let lastBufferTime = 0;
     const poseInterval = 66;  // ~15fps
     const handInterval = 100; // ~10fps（比 pose 低频，省电）
+
+    /** 计算髋部中心 Y 坐标（归一化 0-1） */
+    function calcHipCenterY(landmarks: NormalizedLandmark[]): number {
+      const left = landmarks[LANDMARK.LEFT_HIP];
+      const right = landmarks[LANDMARK.RIGHT_HIP];
+      if (!left || !right) return -1;
+      return (left.y + right.y) / 2;
+    }
+
+    /** 截帧并存入缓冲区 */
+    function captureBufferFrame(video: HTMLVideoElement) {
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+      const scale = Math.min(640 / (video.videoWidth || 640), 480 / (video.videoHeight || 480));
+      canvas.width = Math.round((video.videoWidth || 640) * scale);
+      canvas.height = Math.round((video.videoHeight || 480) * scale);
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return null;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const base64 = canvas.toDataURL('image/jpeg', 0.6).replace(/^data:image\/jpeg;base64,/, '');
+
+      const hipCenterY = poseLandmarksRef.current.length > 0
+        ? calcHipCenterY(poseLandmarksRef.current) : -1;
+
+      let poseSnapshot = '';
+      if (poseLandmarksRef.current.length > 0) {
+        poseSnapshot = landmarksToSnapshot(poseLandmarksRef.current, canvas.width, canvas.height);
+      }
+      let handSnapshot = '';
+      if (handResultsRef.current.length > 0) {
+        handSnapshot = handLandmarksToSnapshot(handResultsRef.current as any, canvas.width, canvas.height);
+      }
+
+      const entry: FrameBufferEntry = {
+        timestamp: Date.now(),
+        base64,
+        poseSnapshot,
+        handSnapshot,
+        hipCenterY,
+      };
+      frameBufferRef.current.push(entry);
+      // 裁剪超出窗口的旧帧
+      const cutoff = Date.now() - FRAME_BUFFER_SECONDS * 1000;
+      frameBufferRef.current = frameBufferRef.current.filter(e => e.timestamp > cutoff);
+
+      return entry;
+    }
 
     async function startDetection() {
       try {
@@ -138,10 +222,93 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
             handsThisFrame = handRes.length > 0 ? (handRes as unknown as HandRes[]) : undefined;
           }
 
+          // ── 帧缓冲区（周期性截帧） ──────────────────────────
+          if (timestamp - lastBufferTime >= FRAME_BUFFER_INTERVAL) {
+            lastBufferTime = timestamp;
+            captureBufferFrame(video);
+          }
+
           // 规则引擎 + 回调
           if (onPoseMarkers && poseLandmarksRef.current.length > 0) {
             const ruleResult = analyzePose(poseLandmarksRef.current);
             onPoseMarkers(ruleResult.markers, poseLandmarksRef.current, handsThisFrame);
+          }
+
+          // ── 卡关检测 ────────────────────────────────────────
+          if (poseLandmarksRef.current.length > 0) {
+            const currentHipY = calcHipCenterY(poseLandmarksRef.current);
+            if (currentHipY >= 0) {
+              // Y 轴位移判断
+              if (lastHipYRef.current >= 0) {
+                const deltaY = Math.abs(currentHipY - lastHipYRef.current);
+                if (deltaY < STUCK_Y_THRESHOLD) {
+                  stillTimerRef.current += poseInterval; // 约 66ms
+                } else {
+                  stillTimerRef.current = 0;
+                  stuckTriggeredRef.current = false;
+                }
+              }
+              lastHipYRef.current = currentHipY;
+
+              // 持续静止 >= STUCK_TIME_MS → 卡关
+              const now = Date.now();
+              if (
+                stillTimerRef.current >= STUCK_TIME_MS &&
+                !stuckTriggeredRef.current &&
+                (now - lastStuckTimestampRef.current) > 15000 && // 15 秒冷却
+                onStuck
+              ) {
+                stuckTriggeredRef.current = true;
+                lastStuckTimestampRef.current = now;
+                console.warn('[CameraStream] 卡关检测触发!');
+                // 取缓冲区中最近 4 秒的帧
+                const recent = frameBufferRef.current
+                  .filter(e => e.timestamp > now - 5000);
+                onStuck(recent);
+              }
+
+              // 掉落检测：Y 快速下降
+              if (onFall) {
+                const buf = frameBufferRef.current;
+                if (buf.length >= 2 && !fallTriggeredRef.current) {
+                  const prev = buf[buf.length - 2];
+                  const curr = buf[buf.length - 1];
+                  if (prev.hipCenterY >= 0 && curr.hipCenterY >= 0) {
+                    const yDelta = curr.hipCenterY - prev.hipCenterY;
+                    if (yDelta > FALL_Y_DROP) {
+                      fallTriggeredRef.current = true;
+                      console.warn('[CameraStream] 掉落检测触发! Y drop:', yDelta);
+                      onFall(buf);
+                    }
+                  }
+                }
+                // 复位：如果用户重新上墙（姿态存在且 hip Y 回到高位置）
+                if (fallTriggeredRef.current && currentHipY < 0.5) {
+                  fallTriggeredRef.current = false;
+                }
+              }
+            }
+          } else {
+            // 姿态丢失 → 可能刚落地
+            const buf = frameBufferRef.current;
+            if (
+              !fallTriggeredRef.current &&
+              buf.length > 3 &&
+              lastHipYRef.current >= 0 &&
+              onFall
+            ) {
+              const prevEntry = buf[buf.length - 1];
+              if (prevEntry.hipCenterY >= 0) {
+                const midIdx = Math.max(0, buf.length - 4);
+                const midY = buf[midIdx].hipCenterY;
+                const lastY = prevEntry.hipCenterY;
+                if (lastY - midY > FALL_Y_DROP * 0.8) {
+                  fallTriggeredRef.current = true;
+                  console.warn('[CameraStream] 姿态丢失+向下趋势 → 掉落');
+                  onFall(buf);
+                }
+              }
+            }
           }
         };
 
@@ -157,7 +324,7 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
       poseActiveRef.current = false;
       cancelAnimationFrame(rafId);
     };
-  }, [onPoseMarkers]);
+  }, [onPoseMarkers, onStuck, onFall]);
 
   // ─── 截帧分析（帧 + 骨骼 + 手势）─────────────────────────
   const captureFrame = useCallback(() => {

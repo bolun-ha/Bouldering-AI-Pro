@@ -215,6 +215,54 @@ export default function App() {
     });
   }, []);
 
+  // ─── 卡关 5v 分析 ─────────────────────────────────────────
+  const [betaSuggestion, setBetaSuggestion] = useState<string | null>(null);
+  const betaTimerRef = useRef<number>(0);
+  const analyzingStuckRef = useRef(false);
+
+  const handleStuck = useCallback(async (buffer: any[]) => {
+    if (analyzingStuckRef.current) return;
+    analyzingStuckRef.current = true;
+    try {
+      // 从缓冲区提取 3-4 帧
+      const frames = buffer.slice(-4).map((e: any) => ({
+        base64: e.base64,
+        timestamp: e.timestamp,
+      }));
+      const prompt = `你是一名抱石攀岩教练。用户卡在岩壁上了！请用一句话（20字以内）给出最简短的动作建议（比如"右脚踩高，左手换大点"）。不要解释，不要多余内容。`;
+
+      const res = await fetch('/api/analyze-stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ frames, prompt, model: 'glm-5v-turbo' }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const content = json.content || '';
+        // 清理 JSON 包裹，提取纯文本
+        const cleaned = content.replace(/^```(?:json)?\s*/, '').replace(/\s*```\s*$/, '').trim();
+        const text = cleaned.length > 60 ? cleaned.slice(0, 60) : cleaned;
+        setBetaSuggestion(text);
+        // 8 秒后自动消失
+        if (betaTimerRef.current) clearTimeout(betaTimerRef.current);
+        betaTimerRef.current = window.setTimeout(() => setBetaSuggestion(null), 8000);
+      }
+    } catch (err) {
+      console.warn('[Stuck] 5v 分析失败:', err);
+    } finally {
+      analyzingStuckRef.current = false;
+    }
+  }, []);
+
+  // ─── 掉落自动复盘 ─────────────────────────────────────────
+  const handleFall = useCallback(async (buffer: any[]) => {
+    console.log('[Fall] 检测到掉落，缓冲区帧数:', buffer.length);
+    // stop recording if active
+    if (isRecording) {
+      stopClimb();
+    }
+  }, [isRecording, stopClimb]);
+
   return (
     <>
       <QRPopover isOpen={showQR} onClose={() => setShowQR(false)} xiaohongshuQR="/xiaohongshu-qr.png" />
@@ -266,6 +314,8 @@ export default function App() {
             <CameraStream
               onFrame={handleFrame}
               onPoseMarkers={handlePoseMarkers}
+              onStuck={handleStuck}
+              onFall={handleFall}
               isRecording={isRecording}
               captureInterval={1800}
               onError={setCameraError}
@@ -308,6 +358,26 @@ export default function App() {
             {/* Overlays */}
             <Overlay markers={currentResult?.markers || []} />
             <GuidancePanel result={currentResult} isAnalyzing={isAnalyzing} error={analysisError} />
+
+            {/* 卡关 Beta 建议浮层 */}
+            <AnimatePresence>
+              {betaSuggestion && (
+                <motion.div
+                  initial={{ y: 20, opacity: 0, scale: 0.9 }}
+                  animate={{ y: 0, opacity: 1, scale: 1 }}
+                  exit={{ y: 20, opacity: 0, scale: 0.9 }}
+                  className="absolute bottom-32 left-6 right-6 z-50 max-w-sm mx-auto"
+                >
+                  <div className="bg-gradient-to-br from-orange-600/95 to-orange-700/95 backdrop-blur-md border border-orange-400/50 p-4 rounded-2xl shadow-2xl shadow-orange-600/30">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-6 h-6 bg-white/20 rounded-full flex items-center justify-center text-xs font-black">💡</div>
+                      <span className="text-[10px] font-black text-orange-200 uppercase tracking-widest">AI 建议</span>
+                    </div>
+                    <p className="text-white text-base font-bold leading-tight">{betaSuggestion}</p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* 录制中提示（录制时显示录制小红点） */}
             {isRecording && (
