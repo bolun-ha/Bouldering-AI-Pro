@@ -8,7 +8,7 @@ import { jsonrepair } from "jsonrepair";
 dotenv.config();
 
 const app = express();
-const PORT = 3001;
+const PORT = 3002;
 
 // Increase limit for base64 frames
 app.use(express.json({ limit: "10mb" }));
