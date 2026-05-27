@@ -24,6 +24,47 @@ import { analyzePose } from '../utils/poseRules';
 import { Overlay } from './Overlay';
 import type { Marker, HandResult } from '../types';
 
+// 人体合理性校验：防止墙壁纹理/岩点图案被误识别成人
+// 检查骨骼点比例是否符合真实人体尺寸
+// 返回 false → 丢弃该帧骨骼数据（保持上一帧有效数据）
+function isBodyPlausible(lm: NormalizedLandmark[]): boolean {
+  if (lm.length < 33) return false;
+
+  const sL = lm[LANDMARK.LEFT_SHOULDER];
+  const sR = lm[LANDMARK.RIGHT_SHOULDER];
+  if (!sL || !sR || sL.visibility !== undefined && sL.visibility < 0.5) return false;
+
+  const sWidth = Math.abs(sL.x - sR.x);
+  // 肩膀宽必须在 5%~50% 帧宽之间
+  if (sWidth < 0.05 || sWidth > 0.50) return false;
+
+  const hL = lm[LANDMARK.LEFT_HIP];
+  const hR = lm[LANDMARK.RIGHT_HIP];
+  if (hL && hR && hL.visibility !== undefined && hL.visibility >= 0.5) {
+    const hWidth = Math.abs(hL.x - hR.x);
+    // 髋宽必须在 3%~50%，且与肩宽比 < 2x
+    if (hWidth < 0.03 || hWidth > 0.50 || hWidth / sWidth > 2) return false;
+  }
+
+  const nose = lm[LANDMARK.NOSE];
+  if (nose && nose.visibility !== undefined && nose.visibility >= 0.5) {
+    const ankleL = lm[LANDMARK.LEFT_ANKLE];
+    const ankleR = lm[LANDMARK.RIGHT_ANKLE];
+    // 至少一个脚踝可见时才校验高度
+    const ankleY = Math.min(
+      ankleL && ankleL.y < 1 ? ankleL.y : 99,
+      ankleR && ankleR.y < 1 ? ankleR.y : 99,
+    );
+    if (ankleY < 1) {
+      const bodyH = ankleY - nose.y;
+      // 鼻到踝高度必须在 20%~95% 帧高
+      if (bodyH < 0.20 || bodyH > 0.95) return false;
+    }
+  }
+
+  return true;
+}
+
 /** 帧缓冲区条目 */
 interface FrameBufferEntry {
   timestamp: number;
@@ -258,9 +299,10 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           if (timestamp - lastPoseTime >= poseInterval) {
             lastPoseTime = timestamp;
             const poseRes = detectPose(video, currentTs);
-            if (poseRes) {
+            if (poseRes && isBodyPlausible(poseRes.landmarks)) {
               poseLandmarksRef.current = poseRes.landmarks;
             }
+            // 不合理骨骼点 → 保持上一帧（poseLandmarksRef 不清空），防止标注跳动
           }
 
           // Hand 检测（与 Pose 共享同一时间戳，串行执行防止 Wasm 内部时序紊乱）
