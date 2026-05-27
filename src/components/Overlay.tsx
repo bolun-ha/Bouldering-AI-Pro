@@ -43,7 +43,8 @@ function layoutMarkers(markers: Marker[]): (Marker & { offsetY: number })[] {
 }
 
 export const Overlay: React.FC<OverlayProps> = ({ markers }) => {
-  const laidOut = useMemo(() => layoutMarkers(markers), [markers]);
+  // 总安全上限：最多显示 3 个标注（防任何累积场景）
+  const laidOut = useMemo(() => layoutMarkers(markers.slice(0, 3)), [markers]);
 
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden">

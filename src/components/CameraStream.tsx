@@ -104,6 +104,9 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
   const poseLandmarksRef = useRef<NormalizedLandmark[]>([]);
   const handResultsRef = useRef<HandRes[]>([]);
   const poseActiveRef = useRef(false);
+  // 用 ref 避免 useEffect 闭包捕获 stale 值
+  const isRecordingRef = useRef(isRecording);
+  isRecordingRef.current = isRecording;
 
   // ─── 帧缓冲区（供卡关/掉落触发时截取） ────────────────────
   const frameBufferRef = useRef<FrameBufferEntry[]>([]);
@@ -272,7 +275,7 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
 
           // 规则引擎 + 回调
           // 仅在录制中时才发送姿态标注（防止未开始攀爬就显示）
-          if (isRecording && onPoseMarkers && poseLandmarksRef.current.length > 0) {
+          if (isRecordingRef.current && onPoseMarkers && poseLandmarksRef.current.length > 0) {
             const ruleResult = analyzePose(poseLandmarksRef.current);
             // 校正坐标：考虑 object-contain 黑边，使标注贴合实际身体部位
             const adjusted = ruleResult.markers.map(m => {

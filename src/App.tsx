@@ -142,7 +142,9 @@ export default function App() {
             if (holdMarkers.length > 0) {
               setCurrentResult(prev => {
                 if (!prev) return prev;
-                return { ...prev, markers: [...prev.markers, ...holdMarkers] };
+                // 移除旧的手部距离标记（不累积），再追加新的
+                const filtered = prev.markers.filter(m => !m.label.includes('未握住') && !m.label.includes('抓握异常'));
+                return { ...prev, markers: [...filtered, ...holdMarkers] };
               });
             }
           }
