@@ -26,8 +26,13 @@ const MARKER_COLORS: Record<string, { bg: string; border: string; glow: string }
 };
 
 /**
- * 隐藏 canvas 合成器：将摄像头画面 + AI 标记绘制到画布上，
- * 并用 MediaRecorder 录制为带标注的视频。
+ * 双轨录制 + 离线合成
+ *
+ * 攀爬中：仅录制原始视频（硬件编码，几乎无 CPU 开销）
+ * 同时记录标注时间轴（markerTimeline）
+ *
+ * 完攀后：离线回放原始视频，快速 Canvas 合成标注版
+ * → 输出 annotatedBlob + rawBlob 两份视频
  */
 export const VideoRecorder: React.FC<VideoRecorderProps> = ({
   video,
@@ -42,121 +47,257 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
   const chunksRef = useRef<Blob[]>([]);
   const rawChunksRef = useRef<Blob[]>([]);
   const mimeTypeRef = useRef<string>('video/webm');
-  const rafRef = useRef<number>(0);
-  const markersRef = useRef<Marker[]>(markers);
   const isRecordingRef = useRef<boolean>(false);
-  const completedRef = useRef(false); // 防重复触发 onstop
+  const completedRef = useRef(false);
+  const markerTimelineRef = useRef<{ time: number; markers: Marker[] }[]>([]);
 
-  // 保持 markers 引用最新，避免闭包捕获旧值
+  // ── 标注时间轴：每次 markers 变化时记录当前视频时间 ──────
   useEffect(() => {
-    markersRef.current = markers;
-  }, [markers]);
-
-  const drawFrame = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
-
-    try {
-
-    // 1. 绘制视频帧
-    if (video && video.readyState >= 2) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    } else {
-      ctx.fillStyle = '#020617'; // slate-950
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (active && video && markers.length > 0) {
+      markerTimelineRef.current.push({
+        time: video.currentTime,
+        markers: markers.map(m => ({ ...m })), // 浅拷贝防引用
+      });
     }
+  }, [markers, active, video]);
 
-    // 2. 绘制 AI 标记
-    const currentMarkers = markersRef.current;
-    const cw = canvas.width;
-    const ch = canvas.height;
+  // ── 离线合成标注版视频 ─────────────────────────────────
+  const synthesizeAnnotatedVideo = useCallback(async (rawBlob: Blob): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const playbackVideo = document.createElement('video');
+      playbackVideo.muted = true;
+      playbackVideo.playsInline = true;
+      playbackVideo.preload = 'auto';
+      const url = URL.createObjectURL(rawBlob);
+      playbackVideo.src = url;
 
-    currentMarkers.forEach((marker) => {
-      const x = (marker.x / 100) * cw;
-      const y = (marker.y / 100) * ch;
-      const color = MARKER_COLORS[marker.type] || MARKER_COLORS.info;
+      playbackVideo.onloadedmetadata = () => {
+        const synthCanvas = document.createElement('canvas');
+        const aspect = playbackVideo.videoHeight / playbackVideo.videoWidth || 1;
+        synthCanvas.width = 640;
+        synthCanvas.height = Math.round(640 * aspect);
 
-      // --- 圆形发光环 ---
-      const gradient = ctx.createRadialGradient(x, y, 2, x, y, 28);
-      gradient.addColorStop(0, color.glow);
-      gradient.addColorStop(1, 'transparent');
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.arc(x, y, 28, 0, Math.PI * 2);
-      ctx.fill();
+        const ctx = synthCanvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) { reject(new Error('Canvas not supported')); return; }
 
-      // --- 实心圆点 ---
-      ctx.beginPath();
-      ctx.arc(x, y, 6, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff';
-      ctx.fill();
-      ctx.shadowColor = '#ffffff';
-      ctx.shadowBlur = 12;
-      ctx.fill();
-      ctx.shadowBlur = 0;
+        const timeline = markerTimelineRef.current;
 
-      // --- 标记标签（带背景色的圆角矩形） ---
-      const label = marker.label.toUpperCase();
-      ctx.font = 'bold 12px Inter, system-ui, sans-serif';
-      const textWidth = ctx.measureText(label).width;
-      const padX = 10;
-      const padY = 5;
-      const labelW = textWidth + padX * 2;
-      const labelH = 24;
-      const labelX = x - labelW / 2;
-      const labelY = y - 36;
+        // 找到最接近 targetTime 的标注（取 <= targetTime 的最新一个）
+        const findMarkers = (targetTime: number): Marker[] | null => {
+          if (timeline.length === 0) return null;
+          let best = timeline[0];
+          for (const entry of timeline) {
+            if (entry.time <= targetTime) best = entry;
+            if (entry.time > targetTime) break;
+          }
+          return best.markers;
+        };
 
-      // 背景圆角矩形
-      const r = 5;
-      ctx.beginPath();
-      ctx.moveTo(labelX + r, labelY);
-      ctx.lineTo(labelX + labelW - r, labelY);
-      ctx.quadraticCurveTo(labelX + labelW, labelY, labelX + labelW, labelY + r);
-      ctx.lineTo(labelX + labelW, labelY + labelH - r);
-      ctx.quadraticCurveTo(labelX + labelW, labelY + labelH, labelX + labelW - r, labelY + labelH);
-      ctx.lineTo(labelX + r, labelY + labelH);
-      ctx.quadraticCurveTo(labelX, labelY + labelH, labelX, labelY + labelH - r);
-      ctx.lineTo(labelX, labelY + r);
-      ctx.quadraticCurveTo(labelX, labelY, labelX + r, labelY);
-      ctx.closePath();
-      ctx.fillStyle = color.bg;
-      ctx.fill();
+        // 在 Canvas 上绘制标注
+        const drawMarkers = (markersToDraw: Marker[], cw: number, ch: number) => {
+          for (const marker of markersToDraw) {
+            const x = (marker.x / 100) * cw;
+            const y = (marker.y / 100) * ch;
+            const color = MARKER_COLORS[marker.type] || MARKER_COLORS.info;
 
-      // 文字
-      ctx.fillStyle = '#ffffff';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, x, labelY + labelH / 2);
+            // 发光环
+            const gradient = ctx!.createRadialGradient(x, y, 2, x, y, 28);
+            gradient.addColorStop(0, color.glow);
+            gradient.addColorStop(1, 'transparent');
+            ctx!.fillStyle = gradient;
+            ctx!.beginPath();
+            ctx!.arc(x, y, 28, 0, Math.PI * 2);
+            ctx!.fill();
+
+            // 实心圆点
+            ctx!.beginPath();
+            ctx!.arc(x, y, 6, 0, Math.PI * 2);
+            ctx!.fillStyle = '#ffffff';
+            ctx!.fill();
+            ctx!.shadowColor = '#ffffff';
+            ctx!.shadowBlur = 12;
+            ctx!.fill();
+            ctx!.shadowBlur = 0;
+
+            // 标签
+            const label = marker.label.toUpperCase();
+            ctx!.font = 'bold 12px Inter, system-ui, sans-serif';
+            const textWidth = ctx!.measureText(label).width;
+            const padX = 10, padY = 5;
+            const labelW = textWidth + padX * 2;
+            const labelH = 24;
+            const labelX = x - labelW / 2;
+            const labelY = y - 36;
+
+            const r = 5;
+            ctx!.beginPath();
+            ctx!.moveTo(labelX + r, labelY);
+            ctx!.lineTo(labelX + labelW - r, labelY);
+            ctx!.quadraticCurveTo(labelX + labelW, labelY, labelX + labelW, labelY + r);
+            ctx!.lineTo(labelX + labelW, labelY + labelH - r);
+            ctx!.quadraticCurveTo(labelX + labelW, labelY + labelH, labelX + labelW - r, labelY + labelH);
+            ctx!.lineTo(labelX + r, labelY + labelH);
+            ctx!.quadraticCurveTo(labelX, labelY + labelH, labelX, labelY + labelH - r);
+            ctx!.lineTo(labelX, labelY + r);
+            ctx!.quadraticCurveTo(labelX, labelY, labelX + r, labelY);
+            ctx!.closePath();
+            ctx!.fillStyle = color.bg;
+            ctx!.fill();
+
+            ctx!.fillStyle = '#ffffff';
+            ctx!.textAlign = 'center';
+            ctx!.textBaseline = 'middle';
+            ctx!.fillText(label, x, labelY + labelH / 2);
+          }
+        };
+
+        const getMimeType = () => {
+          if (MediaRecorder.isTypeSupported('video/mp4')) return 'video/mp4';
+          if (MediaRecorder.isTypeSupported('video/webm;codecs=h264,opus'))
+            return 'video/webm;codecs=h264,opus';
+          if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus'))
+            return 'video/webm;codecs=vp9,opus';
+          if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'))
+            return 'video/webm;codecs=vp8,opus';
+          return 'video/webm';
+        };
+
+        const synthMimeType = getMimeType();
+        const stream = synthCanvas.captureStream(Math.min(fps, 30));
+        const recorder = new MediaRecorder(stream, { mimeType: synthMimeType });
+        const synthChunks: Blob[] = [];
+
+        recorder.ondataavailable = (e: BlobEvent) => {
+          if (e.data.size > 0) synthChunks.push(e.data);
+        };
+
+        recorder.onstop = () => {
+          URL.revokeObjectURL(url);
+          const blob = new Blob(synthChunks, { type: synthMimeType });
+          resolve(blob);
+        };
+
+        // 开始录制
+        recorder.start(100);
+
+        // 逐帧 Seek 合成（比 play-through 更准确，不受播放速率影响）
+        const duration = playbackVideo.duration;
+        const step = 1 / fps; // 每帧间隔（秒）
+        const totalFrames = Math.ceil(duration / step);
+        let frameIndex = 0;
+
+        const captureFrame = () => {
+          if (frameIndex >= totalFrames) {
+            recorder.stop();
+            return;
+          }
+
+          const targetTime = frameIndex * step;
+          // 避免最后一帧超出时长
+          if (targetTime > duration) {
+            recorder.stop();
+            return;
+          }
+
+          playbackVideo.currentTime = targetTime;
+        };
+
+        playbackVideo.onseeked = () => {
+          // 绘制视频帧
+          ctx.drawImage(playbackVideo, 0, 0, synthCanvas.width, synthCanvas.height);
+
+          // 绘制标注
+          const matched = findMarkers(playbackVideo.currentTime);
+          if (matched && matched.length > 0) {
+            drawMarkers(matched, synthCanvas.width, synthCanvas.height);
+          }
+
+          // 水印
+          ctx.fillStyle = 'rgba(255,255,255,0.4)';
+          ctx.font = 'bold 14px Inter, system-ui, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          ctx.fillText('AI 抱石教练 · 专业版', 16, 16);
+
+          frameIndex++;
+          // 微延迟让 MediaRecorder 有时间捕获帧
+          setTimeout(captureFrame, 30);
+        };
+
+        playbackVideo.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error('Playback video load failed'));
+        };
+
+        captureFrame();
+      };
+
+      playbackVideo.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Failed to load raw video for synthesis'));
+      };
     });
+  }, [fps]);
 
-    // 3. 水印
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.font = 'bold 14px Inter, system-ui, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText('AI 抱石教练 · 专业版', 16, 16);
-
-    // 4. 继续下一帧
-    } catch (_) { /* draw 失败不影响录制 */ }
-    rafRef.current = requestAnimationFrame(drawFrame);
-  }, [video]);
-
-  // 开始/停止录制
+  // ── 录制主逻辑 ─────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !video) return;
-
-    let rawBlobResult: Blob | undefined;
 
     if (active) {
       // 重置状态
       chunksRef.current = [];
       rawChunksRef.current = [];
+      markerTimelineRef.current = [];
       isRecordingRef.current = true;
+      completedRef.current = false;
 
-      // 匹配 video 尺寸（降至 640p 减少 Canvas 重绘负载，手机攀爬时不掉帧）
+      // 检查 MediaRecorder 支持
+      if (!window.MediaRecorder) {
+        console.warn('MediaRecorder 不受支持，跳过视频录制');
+        return;
+      }
+
+      const getMimeType = () => {
+        if (MediaRecorder.isTypeSupported('video/mp4')) return 'video/mp4';
+        console.debug('[VideoRecorder] isTypeSupported checks:',
+          'mp4:', MediaRecorder.isTypeSupported('video/mp4'),
+          'h264,opus:', MediaRecorder.isTypeSupported('video/webm;codecs=h264,opus'),
+          'vp9,opus:', MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus'),
+          'vp8,opus:', MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'));
+        if (MediaRecorder.isTypeSupported('video/webm;codecs=h264,opus'))
+          return 'video/webm;codecs=h264,opus';
+        if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus'))
+          return 'video/webm;codecs=vp9,opus';
+        if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'))
+          return 'video/webm;codecs=vp8,opus';
+        return 'video/webm';
+      };
+
+      const mimeType = getMimeType();
+      mimeTypeRef.current = mimeType;
+
+      // 【攀爬中】仅录制原始视频（硬件编码，不占 CPU）
+      if (video.captureStream) {
+        try {
+          const rawStream = video.captureStream();
+          const rawRecorder = new MediaRecorder(rawStream, { mimeType });
+          rawRecorderRef.current = rawRecorder;
+
+          rawRecorder.ondataavailable = (e: BlobEvent) => {
+            if (e.data.size > 0) rawChunksRef.current.push(e.data);
+          };
+
+          rawRecorder.start(200);
+          console.log('[VideoRecorder] 原始视频录制已启动');
+        } catch (err) {
+          console.error('启动原始视频录制失败:', err);
+          rawRecorderRef.current = null;
+        }
+      }
+
+      // 不在此处启动 Canvas 合成！全部在 offline 阶段完成
+      // Canvas 仅用作合成标注版视频的离线容器
       const maxDim = 640;
       let w = video.videoWidth || 1280;
       let h = video.videoHeight || 720;
@@ -167,125 +308,51 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
       }
       canvas.width = w;
       canvas.height = h;
-
-      // 检查 MediaRecorder 支持
-      if (!window.MediaRecorder) {
-        console.warn('MediaRecorder 不受支持，跳过视频录制');
-        return;
-      }
-
-      const getMimeType = () => {
-        // iOS Safari: MP4 容器格式（浏览器自动选 H.264 codec）
-        // 注意：不指定 codec 字符串，避免 iOS 解析失败
-        if (MediaRecorder.isTypeSupported('video/mp4'))
-          return 'video/mp4';
-        // iOS Safari MediaRecorder 实际支持格式诊断
-        console.debug('[VideoRecorder] isTypeSupported checks:',
-          'mp4:', MediaRecorder.isTypeSupported('video/mp4'),
-          'h264,opus:', MediaRecorder.isTypeSupported('video/webm;codecs=h264,opus'),
-          'vp9,opus:', MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus'),
-          'vp8,opus:', MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'));
-        // Chrome/Android: 次选 H.264 in WebM
-        if (MediaRecorder.isTypeSupported('video/webm;codecs=h264,opus'))
-          return 'video/webm;codecs=h264,opus';
-        // 兜底 VP9 / VP8
-        if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus'))
-          return 'video/webm;codecs=vp9,opus';
-        if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'))
-          return 'video/webm;codecs=vp8,opus';
-        return 'video/webm';
-      };
-
-      // 标注版录制（canvas 合成流）
-      try {
-        const stream = canvas.captureStream(Math.min(fps, 30));
-        const mimeType = getMimeType();
-        mimeTypeRef.current = mimeType;
-        const mediaRecorder = new MediaRecorder(stream, { mimeType });
-        mediaRecorderRef.current = mediaRecorder;
-
-        mediaRecorder.ondataavailable = (e: BlobEvent) => {
-          if (e.data.size > 0) chunksRef.current.push(e.data);
-        };
-
-        mediaRecorder.start(200);
-      } catch (err) {
-        console.error('启动标注版录制失败:', err);
-      }
-
-      // 原始无标注版录制（直接从 video 元素捕获）
-      if (video.captureStream) {
-        try {
-          const rawStream = video.captureStream();
-          const mimeType = getMimeType();
-          const rawRecorder = new MediaRecorder(rawStream, { mimeType });
-          rawRecorderRef.current = rawRecorder;
-
-          rawRecorder.ondataavailable = (e: BlobEvent) => {
-            if (e.data.size > 0) rawChunksRef.current.push(e.data);
-          };
-
-          rawRecorder.start(200);
-        } catch (err) {
-          console.error('启动原始版录制失败:', err);
-          rawRecorderRef.current = null;
-        }
-      }
-
-      // 开始绘制循环
-      rafRef.current = requestAnimationFrame(drawFrame);
     }
 
+    // ── 停止录制 → 离线合成标注版 ──────────────────────
     return () => {
-      // 清理：停止绘制循环 + 停止录制
-      cancelAnimationFrame(rafRef.current);
+      isRecordingRef.current = false;
+      if (completedRef.current) return;
+      completedRef.current = true;
 
-      let annotatedDone = false;
-      let rawDone = false;
-      rawBlobResult = undefined;
-      completedRef.current = false; // 重置防重复锁
+      // 停止原始录制，获取 rawBlob
+      const rawBlobPromise = new Promise<Blob | null>((resolve) => {
+        if (rawRecorderRef.current && rawRecorderRef.current.state !== 'inactive') {
+          rawRecorderRef.current.onstop = () => {
+            const rawBlob = new Blob(rawChunksRef.current, { type: mimeTypeRef.current });
+            resolve(rawBlob);
+          };
+          rawRecorderRef.current.stop();
+        } else {
+          // 没有原始录制 → 获取失败，后续 fallback
+          resolve(null);
+        }
+      });
 
-      const tryComplete = () => {
-        if (!annotatedDone || !rawDone || completedRef.current) return;
-        completedRef.current = true;
-        isRecordingRef.current = false;
-        const annotatedBlob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
-        console.log(`录制完成: 标注版 ${(annotatedBlob.size / 1024 / 1024).toFixed(1)}MB, 原始版 ${(rawBlobResult?.size || 0) / 1024 / 1024}MB`);
-        onRecordingComplete({ annotatedBlob, rawBlob: rawBlobResult || annotatedBlob });
-      };
-
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.onstop = () => {
-          annotatedDone = true;
-          tryComplete();
-        };
-        mediaRecorderRef.current.stop();
-      } else {
-        annotatedDone = true;
-      }
-
-      if (rawRecorderRef.current && rawRecorderRef.current.state !== 'inactive') {
-        rawRecorderRef.current.onstop = () => {
-          rawBlobResult = new Blob(rawChunksRef.current, { type: mimeTypeRef.current });
-          rawDone = true;
-          tryComplete();
-        };
-        rawRecorderRef.current.stop();
-      } else {
-        rawDone = true;
-      }
-
-      // 如果没有异步 recorder 需要等待，立即触发
-      if (annotatedDone && rawDone) {
-        isRecordingRef.current = false;
-        const annotatedBlob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
-        onRecordingComplete({
-          annotatedBlob,
-          rawBlob: rawBlobResult || annotatedBlob,
-        });
-      }
+      // 等待 raw blob 就绪，然后开始离线合成
+      rawBlobPromise.then(async (rawBlob) => {
+        if (rawBlob && rawBlob.size > 0) {
+          try {
+            // 离线 Canvas 合成标注版
+            console.log('[VideoRecorder] 正在离线合成标注版视频...');
+            const annotatedBlob = await synthesizeAnnotatedVideo(rawBlob);
+            console.log(`[VideoRecorder] 合成完成: 标注版 ${(annotatedBlob.size / 1024 / 1024).toFixed(1)}MB, 原始版 ${(rawBlob.size / 1024 / 1024).toFixed(1)}MB`);
+            onRecordingComplete({ annotatedBlob, rawBlob });
+          } catch (err) {
+            console.error('[VideoRecorder] 离线合成失败，回退到原始视频:', err);
+            // 合成失败时，用 raw 作为 annotated 的 fallback
+            onRecordingComplete({ annotatedBlob: rawBlob, rawBlob });
+          }
+        } else {
+          // 没有原始视频（video.captureStream 不支持）→ 用空标注版
+          console.warn('[VideoRecorder] 无原始视频，跳过离线合成');
+          const emptyBlob = new Blob([], { type: mimeTypeRef.current });
+          onRecordingComplete({ annotatedBlob: emptyBlob, rawBlob: emptyBlob });
+        }
+      });
     };
-  }, [active, video, fps, drawFrame, onRecordingComplete]);
+  }, [active, video, fps, onRecordingComplete, synthesizeAnnotatedVideo]);
 
   return (
     <canvas
