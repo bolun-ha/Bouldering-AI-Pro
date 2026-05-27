@@ -145,22 +145,37 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
 
   // ─── 4. 肩部耸肩检测 ──────────────────────────────────────────
   const nose = get(LANDMARK.NOSE);
+  const leftEar = get(LANDMARK.LEFT_EAR);
+  const rightEar = get(LANDMARK.RIGHT_EAR);
   for (const [side, shoulder] of [
     ['左', LANDMARK.LEFT_SHOULDER] as const,
     ['右', LANDMARK.RIGHT_SHOULDER] as const,
   ]) {
     const s = get(shoulder);
-    if (s && nose) {
-      // 耸肩简单判断：肩膀 y 坐标接近或高于鼻尖 y（正常应明显低于鼻尖）
-      if (s.y < nose.y + 0.01) {
-        markers.push({
-          x: s.x * 100,
-          y: s.y * 100,
-          type: 'warning',
-          label: `${side}肩耸肩`,
-          description: `${side}肩膀位置偏高，肩胛骨未下沉。建议沉肩收紧背肌，再发力移动。`,
-        });
-      }
+    if (!s) continue;
+
+    // 正面（鼻子可见）：肩膀应明显低于鼻尖
+    if (nose && s.y < nose.y + 0.01) {
+      markers.push({
+        x: s.x * 100,
+        y: s.y * 100,
+        type: 'warning',
+        label: `${side}肩耸肩`,
+        description: `${side}肩膀位置偏高，肩胛骨未下沉。建议沉肩收紧背肌，再发力移动。`,
+      });
+      continue;
+    }
+
+    // 背面（耳朵可见）：从背后看耸肩 = 肩膀靠近耳朵
+    const ear = side === '左' ? leftEar : rightEar;
+    if (ear && s.y < ear.y + 0.03) {
+      markers.push({
+        x: s.x * 100,
+        y: s.y * 100,
+        type: 'warning',
+        label: `${side}肩耸肩`,
+        description: `${side}肩膀位置偏高，肩胛骨未下沉。建议沉肩收紧背肌，再发力移动。`,
+      });
     }
   }
 
