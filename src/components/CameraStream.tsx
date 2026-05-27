@@ -252,7 +252,7 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           // 保证时间戳严格单调递增（Pose + Hand 内部 MediaPipe 图可能共享时间轴）
           const poseTs = Math.floor(Math.max(timestamp, monotonicTsRef.current + 1));
           monotonicTsRef.current = poseTs;
-          const handTs = poseTs + 2; // Hand 用稍大的时间戳，不与 pose 冲突
+          const handTs = poseTs + 3; // Hand 用稍大的时间戳，不与 pose 冲突
 
           // Pose 检测
           if (timestamp - lastPoseTime >= poseInterval) {
