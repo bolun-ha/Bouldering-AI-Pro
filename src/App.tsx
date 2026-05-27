@@ -72,6 +72,7 @@ export default function App() {
   const stopClimb = useCallback(() => {
     startingRef.current = false; // 重置开始锁
     setIsRecording(false);
+    setCurrentResult(null); // 清除残留标注，防止报告关闭后还在显示
     setSession(prev => {
       if (!prev) return prev;
       return { ...prev, endTime: Date.now() };
@@ -436,8 +437,8 @@ export default function App() {
               </div>
             )}
 
-            {/* Overlays */}
-            <Overlay markers={currentResult?.markers || []} />
+            {/* Overlays — 仅在录制中显示标注圈，防止非录制时残留 */}
+            {isRecording && <Overlay markers={currentResult?.markers || []} />}
             <GuidancePanel result={currentResult} isAnalyzing={isAnalyzing} error={analysisError} />
 
             {/* 卡关 Beta 建议浮层 */}
