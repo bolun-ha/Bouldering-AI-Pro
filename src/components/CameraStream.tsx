@@ -249,14 +249,15 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           const video = videoRef.current;
           if (!video || video.readyState < 2) return;
 
-          // 保证时间戳严格单调递增
-          const mediapipeTs = Math.floor(Math.max(timestamp, monotonicTsRef.current + 1));
-          monotonicTsRef.current = mediapipeTs;
+          // 保证时间戳严格单调递增（Pose + Hand 内部 MediaPipe 图可能共享时间轴）
+          const poseTs = Math.floor(Math.max(timestamp, monotonicTsRef.current + 1));
+          monotonicTsRef.current = poseTs;
+          const handTs = poseTs + 2; // Hand 用稍大的时间戳，不与 pose 冲突
 
           // Pose 检测
           if (timestamp - lastPoseTime >= poseInterval) {
             lastPoseTime = timestamp;
-            const poseRes = detectPose(video, mediapipeTs);
+            const poseRes = detectPose(video, poseTs);
             if (poseRes) {
               poseLandmarksRef.current = poseRes.landmarks;
             }
@@ -266,7 +267,7 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           let handsThisFrame: HandRes[] | undefined;
           if (timestamp - lastHandTime >= handInterval) {
             lastHandTime = timestamp;
-            const handRes = detectHands(video, mediapipeTs);
+            const handRes = detectHands(video, handTs);
             handResultsRef.current = handRes as unknown as HandRes[];
             handsThisFrame = handRes.length > 0 ? (handRes as unknown as HandRes[]) : undefined;
           }
