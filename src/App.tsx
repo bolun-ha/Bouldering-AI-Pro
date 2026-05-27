@@ -336,8 +336,7 @@ export default function App() {
 
       {/* Full-Screen Content */}
       <main className="flex-1 relative overflow-hidden bg-slate-900 shadow-inner">
-        {mode === 'camera' ? (
-          <>
+        <div className={`absolute inset-0 ${mode === 'camera' ? '' : 'hidden'}`}>
             <CameraStream
               onFrame={handleFrame}
               onPoseMarkers={handlePoseMarkers}
@@ -421,10 +420,10 @@ export default function App() {
                 <span className="text-[8px] font-mono text-blue-400 uppercase tracking-widest">云端分析中</span>
               </div>
             )}
-          </>
-        ) : (
-          <VideoAnalysis />
-        )}
+          </div>
+          <div className={`absolute inset-0 ${mode === 'video' ? '' : 'hidden'}`}>
+            <VideoAnalysis />
+          </div>
       </main>
 
       {/* Camera Mode: Floating Controls Overlay — 纯条件渲染，去动画避免冲突 */}
