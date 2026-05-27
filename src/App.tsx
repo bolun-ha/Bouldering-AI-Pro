@@ -229,45 +229,72 @@ export default function App() {
   }, [isRecording, isAnalyzing]);
 
   // MediaPipe 实时姿态标记（带稳定性缓冲，防频闪）
-  const stableMarkersRef = useRef<{ markers: Marker[]; timestamp: number }>({ markers: [], timestamp: 0 });
+  // 滑窗计数锁（双阈值）：连续 N 帧确认才亮，连续缺失到 M 帧以下才灭
+  // 防后置摄像头光线/阴影导致的高频微小抖动
+  const MARKER_CONFIRM = 5;  // 连续 5 帧（~300ms）都检测到 → 首次亮圈
+  const MARKER_CLEAR = 3;    // 连续衰减到 3 帧以下（~180ms 未检测到）→ 灭圈
+  const markerCountersRef = useRef<Record<string, number>>({});
+  const markerActiveRef = useRef<Set<string>>(new Set());
+  const markerDataRef = useRef<Record<string, import('./types').Marker>>({});
+
+  // MediaPipe 实时姿态标记（带滑窗计数防抖）
   const handlePoseMarkers = useCallback((markers: import('./types').Marker[], _landmarks: any, hands?: any[]) => {
     // 保存手部数据
     if (hands && hands.length > 0) {
       handResultsRef.current = hands;
     }
-    if (markers.length === 0) return;
 
-    const now = Date.now();
-    const stable = stableMarkersRef.current;
-
-    // 稳定性缓冲：新标记必须连续出现 2 帧才显示
-    // 已显示的标记必须连续缺失 300ms 才移除
+    const counters = markerCountersRef.current;
     const currentLabels = new Set(markers.map(m => m.label));
-    const stableLabels = new Set(stable.markers.map(m => m.label));
 
-    // 新出现的标注需要"确认"
-    const newMarkers = markers.filter(m => !stableLabels.has(m.label));
-    // 已稳定的标注只移除消失超过 300ms 的
-    const keepMarkers = stable.markers.filter(m => {
-      if (currentLabels.has(m.label)) return true;
-      return (now - stable.timestamp) < 300;
-    });
+    // 缓存最新标记数据（供衰减期使用，此时标记不在 markers 中）
+    const dataCache = markerDataRef.current;
+    for (const m of markers) {
+      dataCache[m.label] = m;
+    }
 
-    const stabilized = [...keepMarkers, ...newMarkers];
+    // 更新所有计数器
+    const allLabels = new Set([...Object.keys(counters), ...markers.map(m => m.label)]);
+    for (const label of allLabels) {
+      counters[label] = currentLabels.has(label)
+        ? Math.min(MARKER_CONFIRM, (counters[label] || 0) + 1)   // 检测到 → 累加
+        : Math.max(0, (counters[label] || 0) - 1);              // 未检测到 → 衰减
+    }
 
-    stableMarkersRef.current = { markers: stabilized, timestamp: now };
+    // 双阈值管理激活状态
+    const activeSet = markerActiveRef.current;
+    const activeMarkers: import('./types').Marker[] = [];
+    for (const [label, count] of Object.entries(counters)) {
+      if (!activeSet.has(label) && count >= MARKER_CONFIRM) {
+        activeSet.add(label); // 首次亮圈
+      } else if (activeSet.has(label) && count < MARKER_CLEAR) {
+        activeSet.delete(label); // 灭圈
+      }
+    }
 
+    // 从缓存获取活跃标记的完整数据（包括衰减期的）
+    for (const label of activeSet) {
+      const cached = dataCache[label];
+      if (cached) activeMarkers.push(cached);
+    }
+
+    // 清理零值计数
+    for (const key of Object.keys(counters)) {
+      if (counters[key] === 0) delete counters[key];
+    }
+
+    // 更新 UI
     setCurrentResult(prev => {
       if (!prev) {
         return {
-          markers: stabilized,
+          markers: activeMarkers,
           instruction: '',
           detailed_feedback: '',
           detected_route_color: '',
           climb_status: 'moving',
         };
       }
-      const ruleMarkers = stabilized.filter(m => m.type === 'error' || m.type === 'warning').slice(0, 2);
+      const ruleMarkers = activeMarkers.filter(m => m.type === 'error' || m.type === 'warning').slice(0, 2);
       return { ...prev, markers: ruleMarkers };
     });
   }, []);
