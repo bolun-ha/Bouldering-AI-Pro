@@ -49,7 +49,8 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
     }
   };
 
-  // ─── 1. 膝关节角度（膝盖内扣检测）─────────────────────────────
+  // ─── 1. 膝关节——降权处理（攀岩中挂脚/扭膝/Drop Knee 极度弯曲是高级技术）
+  // 只检测极端膝内扣（> 100° 弯曲 + 明显内旋），避免误报 Drop Knee 等有效技术
   for (const [side, hip, knee, ankle] of [
     ['左', LANDMARK.LEFT_HIP, LANDMARK.LEFT_KNEE, LANDMARK.LEFT_ANKLE] as const,
     ['右', LANDMARK.RIGHT_HIP, LANDMARK.RIGHT_KNEE, LANDMARK.RIGHT_ANKLE] as const,
@@ -60,51 +61,58 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
     if (h && k && a) {
       const kneeAngle = angleBetween(h, k, a);
       angleLogs.push(`${side}膝角=${kneeAngle.toFixed(1)}°`);
-      // 膝角 < 130° 且 脚在髋外侧（踩高脚点）→ 可能内扣，检查 z 轴
-      if (kneeAngle < 130) {
-        // 膝盖向内偏移（z 值负方向）
+      // 仅极端内扣触发（< 100° + 明显 z 轴内旋）
+      if (kneeAngle < 100) {
         const inward = side === '左' ? k.z < h.z : k.z > h.z;
-        if (inward && kneeAngle < 120) {
-          markers.push({
-            x: k.x * 100,
-            y: k.y * 100,
-            type: 'error',
-            label: `${side}膝盖内扣`,
-            description: `${side}膝角 ${kneeAngle.toFixed(1)}°，膝盖明显内旋。建议外旋髋关节使膝盖朝前，降低重心。`,
-          });
-        } else if (inward) {
+        if (inward) {
           markers.push({
             x: k.x * 100,
             y: k.y * 100,
             type: 'warning',
-            label: `${side}膝角偏小`,
-            description: `${side}膝角 ${kneeAngle.toFixed(1)}°，注意不要过度内旋。`,
+            label: `${side}膝内扣`,
+            description: `${side}膝角 ${kneeAngle.toFixed(1)}° 且明显内旋。建议调整脚法，避免膝关节过度扭转。`,
           });
         }
       }
     }
   }
 
-  // ─── 2. 肘关节角度（手臂锁死检测）─────────────────────────────
-  for (const [side, shoulder, elbow, wrist] of [
-    ['左', LANDMARK.LEFT_SHOULDER, LANDMARK.LEFT_ELBOW, LANDMARK.LEFT_WRIST] as const,
-    ['右', LANDMARK.RIGHT_SHOULDER, LANDMARK.RIGHT_ELBOW, LANDMARK.RIGHT_WRIST] as const,
+  // ─── 2. 肘部——删除单一角度检测，替换为「鸡翅膀（肘部外扩）」检测
+  // 攀岩中折肘锁（lock-off）在屋檐/仰角墙上是标准技术
+  // 真正的肘部 Error 是侧拉时肘关节向外支开，未内收夹紧，导致肩关节压力暴增
+  for (const [side, shoulder, elbow, wrist, hip] of [
+    ['左', LANDMARK.LEFT_SHOULDER, LANDMARK.LEFT_ELBOW, LANDMARK.LEFT_WRIST, LANDMARK.LEFT_HIP] as const,
+    ['右', LANDMARK.RIGHT_SHOULDER, LANDMARK.RIGHT_ELBOW, LANDMARK.RIGHT_WRIST, LANDMARK.RIGHT_HIP] as const,
   ]) {
     const s = get(shoulder);
     const e = get(elbow);
     const w = get(wrist);
-    if (s && e && w) {
-      const elbowAngle = angleBetween(s, e, w);
-      angleLogs.push(`${side}肘角=${elbowAngle.toFixed(1)}°`);
-      if (elbowAngle > 165) {
-        markers.push({
-          x: e.x * 100,
-          y: e.y * 100,
-          type: 'warning',
-          label: `${side}手臂锁死`,
-          description: `${side}肘角 ${elbowAngle.toFixed(1)}°（>150°），手臂接近伸直。建议放松手臂，多用腿力支撑。`,
-        });
-      }
+    const h = get(hip);
+    if (!s || !e || !w || !h) continue;
+
+    const elbowAngle = angleBetween(s, e, w);
+    angleLogs.push(`${side}肘角=${elbowAngle.toFixed(1)}°`);
+
+    // 鸡翅膀（Elbow Flaring）：肘部向外侧支开，比肩-手连线更远离身体中心
+    // 侧拉时肘应指向身体/地面方向内收；肘向外支开 = 无效发力 + 肩峰撞击风险
+    // 比对方法：肘关节 x 是否比肩和手腕中最内侧的点更"外侧"
+    const innerPoint = side === '左'
+      ? Math.min(s.x, w.x)   // 左臂：越小越外侧
+      : Math.max(s.x, w.x);  // 右臂：越大越外侧
+    const elbowOutside = side === '左'
+      ? e.x < innerPoint - 0.04    // 肘比最内侧点还左 → 外扩
+      : e.x > innerPoint + 0.04;   // 肘比最内侧点还右 → 外扩
+
+    // 只在手臂有受力（手腕不在肩膀旁边：肘角 < 160° 表示手臂有折曲受力）
+    // 抬手过顶（肘角 > 160°）时肘外扩是自然 relax 姿态，不算错误
+    if (elbowOutside && elbowAngle < 155) {
+      markers.push({
+        x: e.x * 100,
+        y: e.y * 100,
+        type: 'error',
+        label: `${side}肘外扩`,
+        description: `${side}肘部向外支开（鸡翅膀），侧拉时未内收夹紧。建议肘关节指向身体发力，降低肩关节压力。`,
+      });
     }
   }
 
@@ -143,7 +151,30 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
     }
   }
 
-  // ─── 4. 肩部耸肩检测 ──────────────────────────────────────────
+  // ─── 4. 🥇 墙面距离（核心生命线）─────────────────────────────────
+  // 攀岩铁律："屁股贴墙，省力一半"。臀部向后撅 → 核心崩溃 → 手臂代偿
+  if (lHip && rHip) {
+    const avgZ = (lHip.z + rHip.z) / 2;
+    angleLogs.push(`臀深度z=${avgZ.toFixed(3)}`);
+    // 正 z = 远离墙面（MediaPipe 深度坐标）
+    if (avgZ > 0.12) {
+      markers.push({
+        x: ((lHip.x + rHip.x) / 2) * 100,
+        y: ((lHip.y + rHip.y) / 2) * 100,
+        type: 'error',
+        label: '臀部远离墙面',
+        description: '臀部距墙面过远，手臂在代偿核心发力。必须收紧核心，臀部贴墙！',
+      });
+    } else if (avgZ > 0.09) {
+      markers.push({
+        x: ((lHip.x + rHip.x) / 2) * 100,
+        y: ((lHip.y + rHip.y) / 2) * 100,
+        type: 'warning',
+        label: '臀部远离墙面',
+        description: '臀部距墙面较远，重心外移增加手臂负担。建议臀部贴近墙面收紧核心。',
+      });
+    }
+  }
   // 用肩髋距离比替代耳朵/鼻子参考，不依赖面部器官，从背后也稳定
   // 原理：耸肩时肩膀上移，同侧肩髋距离增大 → 与另一侧的比例失衡
   const lShoulderPt = get(LANDMARK.LEFT_SHOULDER);
@@ -185,24 +216,7 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
     }
   }
 
-  // ─── 5. 身体与墙面距离估算 ────────────────────────────────────
-  // 通过髋关节 z 值（相对深度）估算
-  if (lHip && rHip) {
-    const avgZ = (lHip.z + rHip.z) / 2;
-    angleLogs.push(`臀深度z=${avgZ.toFixed(3)}`);
-    // 正 z 表示远离墙（MediaPipe 坐标系统）
-    if (avgZ > 0.09) {
-      markers.push({
-        x: ((lHip.x + rHip.x) / 2) * 100,
-        y: ((lHip.y + rHip.y) / 2) * 100,
-        type: 'warning',
-        label: '臀部远离墙面',
-        description: '臀部距墙面较远，重心外移增加手臂负担。建议臀部贴近墙面收紧核心。',
-      });
-    }
-  }
-
-  // ─── 6. 核心 tension 检测 ────────────────────────────────────
+  // ─── 5. 核心 tension 检测 ────────────────────────────────────
   // 粗略判断：肩膀中点和髋中点的水平错位
   const lShoulder = get(LANDMARK.LEFT_SHOULDER);
   const rShoulder = get(LANDMARK.RIGHT_SHOULDER);
