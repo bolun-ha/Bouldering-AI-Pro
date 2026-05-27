@@ -120,7 +120,8 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
   const FALL_Y_DROP = 0.15;       // Y 快速下降 > 15%
 
   // 卡关状态机
-  const stillTimerRef = useRef<number>(0);  // 持续静止的毫秒数
+  const stillAccumMsRef = useRef(0); // 持续静止的毫秒数（用 Date.now delta 计算）
+  const stillLastTimeRef = useRef(0); // 上次静止检测的时间戳
   const lastHipYRef = useRef<number>(-1);   // 上次有效髋部 Y
   const stuckTriggeredRef = useRef(false);  // 已触发卡关提示（防重复）
   const lastStuckTimestampRef = useRef(0);  // 最后卡关触发时间
@@ -294,11 +295,17 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
             if (currentHipY >= 0) {
               // Y 轴位移判断
               if (lastHipYRef.current >= 0) {
+                const now = Date.now();
                 const deltaY = Math.abs(currentHipY - lastHipYRef.current);
                 if (deltaY < STUCK_Y_THRESHOLD) {
-                  stillTimerRef.current += poseInterval; // 约 66ms
+                  // 首次进入静止：记录起始时间
+                  if (stillLastTimeRef.current === 0) {
+                    stillLastTimeRef.current = now;
+                  }
+                  stillAccumMsRef.current = now - stillLastTimeRef.current;
                 } else {
-                  stillTimerRef.current = 0;
+                  stillAccumMsRef.current = 0;
+                  stillLastTimeRef.current = 0;
                   stuckTriggeredRef.current = false;
                 }
               }
@@ -307,7 +314,7 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
               // 持续静止 >= STUCK_TIME_MS → 卡关
               const now = Date.now();
               if (
-                stillTimerRef.current >= STUCK_TIME_MS &&
+                stillAccumMsRef.current >= STUCK_TIME_MS &&
                 !stuckTriggeredRef.current &&
                 (now - lastStuckTimestampRef.current) > 15000 && // 15 秒冷却
                 onStuck
@@ -347,18 +354,18 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
             const buf = frameBufferRef.current;
             if (
               !fallTriggeredRef.current &&
-              buf.length > 3 &&
+              buf.length > 2 &&
               lastHipYRef.current >= 0 &&
               onFall
             ) {
-              const prevEntry = buf[buf.length - 1];
-              if (prevEntry.hipCenterY >= 0) {
-                const midIdx = Math.max(0, buf.length - 4);
-                const midY = buf[midIdx].hipCenterY;
-                const lastY = prevEntry.hipCenterY;
-                if (lastY - midY > FALL_Y_DROP * 0.8) {
+              // 从缓冲区找最高位置，判断是否大幅下降（比固定 offset 更鲁棒）
+              const validY = buf.map(e => e.hipCenterY).filter(y => y >= 0);
+              if (validY.length > 0) {
+                const maxY = Math.max(...validY);
+                const currentY = lastHipYRef.current;
+                if (maxY - currentY > FALL_Y_DROP) {
                   fallTriggeredRef.current = true;
-                  console.warn('[CameraStream] 姿态丢失+向下趋势 → 掉落');
+                  console.warn('[CameraStream] 姿态丢失+相对最高点下降 → 掉落', { maxY, currentY, drop: maxY - currentY });
                   onFall(buf);
                 }
               }

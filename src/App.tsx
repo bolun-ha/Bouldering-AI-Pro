@@ -24,6 +24,7 @@ export default function App() {
   const [mode, setMode] = useState<'camera' | 'video'>('camera');
   const [showQR, setShowQR] = useState(false);
   const cooldownRef = useRef(false);
+  const startingRef = useRef(false); // 防快速双击开始
 
   // Video 元素引用（传给 VideoRecorder 做合成录制）
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
@@ -45,6 +46,8 @@ export default function App() {
   }, []);
 
   const startClimb = () => {
+    if (startingRef.current) return; // 防快速双击
+    startingRef.current = true;
     cooldownRef.current = false; // 重置冷却，防上个 session 的冷却还没结束
     setRecordedVideoBlob(null);
     setSession({
@@ -67,6 +70,7 @@ export default function App() {
   }, []);
 
   const stopClimb = useCallback(() => {
+    startingRef.current = false; // 重置开始锁
     setIsRecording(false);
     setSession(prev => {
       if (!prev) return prev;
