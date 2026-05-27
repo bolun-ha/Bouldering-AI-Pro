@@ -45,6 +45,7 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
   const rafRef = useRef<number>(0);
   const markersRef = useRef<Marker[]>(markers);
   const isRecordingRef = useRef<boolean>(false);
+  const completedRef = useRef(false); // 防重复触发 onstop
 
   // 保持 markers 引用最新，避免闭包捕获旧值
   useEffect(() => {
@@ -243,9 +244,11 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
       let annotatedDone = false;
       let rawDone = false;
       rawBlobResult = undefined;
+      completedRef.current = false; // 重置防重复锁
 
       const tryComplete = () => {
-        if (!annotatedDone || !rawDone) return;
+        if (!annotatedDone || !rawDone || completedRef.current) return;
+        completedRef.current = true;
         isRecordingRef.current = false;
         const annotatedBlob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
         console.log(`录制完成: 标注版 ${(annotatedBlob.size / 1024 / 1024).toFixed(1)}MB, 原始版 ${(rawBlobResult?.size || 0) / 1024 / 1024}MB`);

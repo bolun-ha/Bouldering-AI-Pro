@@ -107,6 +107,9 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
   // 用 ref 避免 useEffect 闭包捕获 stale 值
   const isRecordingRef = useRef(isRecording);
   isRecordingRef.current = isRecording;
+  // onFrame ref（避免 captureFrame 因 onFrame 变化而重建，导致录制间隔重启）
+  const onFrameRef = useRef(onFrame);
+  onFrameRef.current = onFrame;
 
   // ─── 帧缓冲区（供卡关/掉落触发时截取） ────────────────────
   const frameBufferRef = useRef<FrameBufferEntry[]>([]);
@@ -405,8 +408,8 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
       handSnapshot = handLandmarksToSnapshot(handResultsRef.current as any, canvas.width, canvas.height);
     }
 
-    onFrame(canvas, poseSnapshot, handSnapshot);
-  }, [onFrame]);
+    onFrameRef.current(canvas, poseSnapshot, handSnapshot);
+  }, []); // 空依赖：onFrame 通过 ref 获取最新值，避免 interval 重建
 
   // ─── 录制时周期性截帧 ─────────────────────────────────────
   useEffect(() => {

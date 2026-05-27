@@ -45,6 +45,7 @@ export default function App() {
   }, []);
 
   const startClimb = () => {
+    cooldownRef.current = false; // 重置冷却，防上个 session 的冷却还没结束
     setRecordedVideoBlob(null);
     setSession({
       startTime: Date.now(),
@@ -65,17 +66,15 @@ export default function App() {
     }
   }, []);
 
-  const stopClimb = () => {
+  const stopClimb = useCallback(() => {
     setIsRecording(false);
-    if (session) {
-      setSession(prev => {
-        if (!prev) return prev;
-        return { ...prev, endTime: Date.now() };
-      });
-      // 立即显示报告，不延迟
-      setShowReport(true);
-    }
-  };
+    setSession(prev => {
+      if (!prev) return prev;
+      return { ...prev, endTime: Date.now() };
+    });
+    // 立即显示报告，不延迟
+    setShowReport(true);
+  }, []);
 
   const handleFrame = useCallback(async (canvas: HTMLCanvasElement, landmarksSnapshot: string = '', handSnapshot: string = '') => {
     if (!isRecording || isAnalyzing || cooldownRef.current) return;
@@ -284,10 +283,8 @@ export default function App() {
   const handleFall = useCallback(async (buffer: any[]) => {
     console.log('[Fall] 检测到掉落，缓冲区帧数:', buffer.length);
     // stop recording if active
-    if (isRecording) {
-      stopClimb();
-    }
-  }, [isRecording, stopClimb]);
+    stopClimb();
+  }, [stopClimb]);
 
   return (
     <>
