@@ -149,9 +149,37 @@ export default function App() {
             if (holdMarkers.length > 0) {
               setCurrentResult(prev => {
                 if (!prev) return prev;
-                // 移除旧的手部距离标记（不累积），再追加新的
+                // 如果已有姿态规则标注（错误/警告），不叠加手部标记
+                const hasPoseMarkers = prev.markers.some(m => m.type === 'error' || m.type === 'warning');
+                // 只取最近手的标注（最多1个）
+                const top = holdMarkers.slice(0, 1);
+                // 坐标校正：object-cover 裁切，手部坐标偏移
+                const video = videoElementRef.current;
+                if (video && video.videoWidth && video.offsetWidth) {
+                  const vw = video.videoWidth, vh = video.videoHeight;
+                  const cw = video.offsetWidth, ch = video.offsetHeight;
+                  const vAR = vw / vh, cAR = cw / ch;
+                  for (const m of top) {
+                    const nx = m.x / 100, ny = m.y / 100;
+                    let adjX = nx, adjY = ny;
+                    if (vAR > cAR) {
+                      const vr = cAR / vAR;
+                      const cs = (1 - vr) / 2;
+                      adjX = Math.max(0, Math.min(1, (nx - cs) / vr));
+                    } else {
+                      const vr = vAR / cAR;
+                      const cs = (1 - vr) / 2;
+                      adjY = Math.max(0, Math.min(1, (ny - cs) / vr));
+                    }
+                    m.x = adjX * 100;
+                    m.y = adjY * 100;
+                  }
+                }
+                // 移除旧的手部距离标记
                 const filtered = prev.markers.filter(m => !m.label.includes('未握住') && !m.label.includes('抓握异常'));
-                return { ...prev, markers: [...filtered, ...holdMarkers] };
+                // 有姿态规则标注时，不叠加手部标注
+                if (hasPoseMarkers) return prev;
+                return { ...prev, markers: [...filtered, ...top] };
               });
             }
           }
@@ -239,7 +267,7 @@ export default function App() {
           climb_status: 'moving',
         };
       }
-      const ruleMarkers = stabilized.filter(m => m.type === 'error' || m.type === 'warning').slice(0, 2);
+      const ruleMarkers = stabilized.filter(m => m.type === 'error' || m.type === 'warning').slice(0, 1);
       return { ...prev, markers: ruleMarkers };
     });
   }, []);
