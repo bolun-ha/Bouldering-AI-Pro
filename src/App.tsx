@@ -101,7 +101,11 @@ export default function App() {
       }
 
       const result: AnalysisResult = await response.json();
-      setCurrentResult(result);
+      // 保留当前规则标注，仅更新 AI 分析文本（标注始终由 poseRules 控制）
+      setCurrentResult(prev => {
+        if (!prev) return result;
+        return { ...prev, ...result, markers: prev.markers };
+      });
 
       // ── 岩点-手部距离分析 ───────────────────────────────
       if (result.hold_positions && result.hold_positions.length > 0 && handResultsRef.current.length > 0) {
@@ -232,10 +236,8 @@ export default function App() {
           climb_status: 'moving',
         };
       }
-      const ruleMarkers = stabilized.filter(m => m.type === 'error' || m.type === 'warning');
-      const aiMarkers = prev.markers.filter(m => m.type === 'success' || m.type === 'info');
-      const combined = [...ruleMarkers, ...aiMarkers];
-      return { ...prev, markers: combined };
+      const ruleMarkers = stabilized.filter(m => m.type === 'error' || m.type === 'warning').slice(0, 2);
+      return { ...prev, markers: ruleMarkers };
     });
   }, []);
 
