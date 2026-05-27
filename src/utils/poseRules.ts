@@ -130,7 +130,7 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
 
     angleLogs.push(`重心x=${(centerX * 100).toFixed(1)}%, 支撑面宽=${(stanceWidth * 100).toFixed(1)}%, 偏移比=${relDeviation.toFixed(2)}`);
 
-    if (relDeviation > 0.6) {
+    if (relDeviation > 0.45) {
       // 重心偏向一边
       const side = centerX < (lAnkle.x + rAnkle.x) / 2 ? '左' : '右';
       markers.push({
@@ -152,7 +152,7 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
     const s = get(shoulder);
     if (s && nose) {
       // 耸肩简单判断：肩膀 y 坐标接近或高于鼻尖 y（正常应明显低于鼻尖）
-      if (s.y < nose.y - 0.03) {
+      if (s.y < nose.y + 0.01) {
         markers.push({
           x: s.x * 100,
           y: s.y * 100,
@@ -170,7 +170,7 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
     const avgZ = (lHip.z + rHip.z) / 2;
     angleLogs.push(`臀深度z=${avgZ.toFixed(3)}`);
     // 正 z 表示远离墙（MediaPipe 坐标系统）
-    if (avgZ > 0.12) {
+    if (avgZ > 0.09) {
       markers.push({
         x: ((lHip.x + rHip.x) / 2) * 100,
         y: ((lHip.y + rHip.y) / 2) * 100,

@@ -267,7 +267,7 @@ export default function App() {
           climb_status: 'moving',
         };
       }
-      const ruleMarkers = stabilized.filter(m => m.type === 'error' || m.type === 'warning').slice(0, 1);
+      const ruleMarkers = stabilized.filter(m => m.type === 'error' || m.type === 'warning').slice(0, 2);
       return { ...prev, markers: ruleMarkers };
     });
   }, []);
