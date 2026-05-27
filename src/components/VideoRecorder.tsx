@@ -61,7 +61,9 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
     }
   }, [markers, active, video]);
 
-  // ── 离线合成标注版视频 ─────────────────────────────────
+  // ── 离线合成标注版视频（自然播放 + rAF 捕获） ────────────
+  // 避坑：不用 for 循环 seek → 移动端 Safari 硬件解码器会死锁/OOM
+  // 正解：video.play() 自然播放 → rAF 每帧判定是否捕获 → 0 解码压力
   const synthesizeAnnotatedVideo = useCallback(async (rawBlob: Blob): Promise<Blob> => {
     return new Promise((resolve, reject) => {
       const playbackVideo = document.createElement('video');
@@ -94,13 +96,14 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
         };
 
         // 在 Canvas 上绘制标注
-        const drawMarkers = (markersToDraw: Marker[], cw: number, ch: number) => {
+        const drawMarkers = (markersToDraw: Marker[]) => {
+          const cw = synthCanvas.width;
+          const ch = synthCanvas.height;
           for (const marker of markersToDraw) {
             const x = (marker.x / 100) * cw;
             const y = (marker.y / 100) * ch;
             const color = MARKER_COLORS[marker.type] || MARKER_COLORS.info;
 
-            // 发光环
             const gradient = ctx!.createRadialGradient(x, y, 2, x, y, 28);
             gradient.addColorStop(0, color.glow);
             gradient.addColorStop(1, 'transparent');
@@ -109,7 +112,6 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
             ctx!.arc(x, y, 28, 0, Math.PI * 2);
             ctx!.fill();
 
-            // 实心圆点
             ctx!.beginPath();
             ctx!.arc(x, y, 6, 0, Math.PI * 2);
             ctx!.fillStyle = '#ffffff';
@@ -119,7 +121,6 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
             ctx!.fill();
             ctx!.shadowBlur = 0;
 
-            // 标签
             const label = marker.label.toUpperCase();
             ctx!.font = 'bold 12px Inter, system-ui, sans-serif';
             const textWidth = ctx!.measureText(label).width;
@@ -143,7 +144,6 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
             ctx!.closePath();
             ctx!.fillStyle = color.bg;
             ctx!.fill();
-
             ctx!.fillStyle = '#ffffff';
             ctx!.textAlign = 'center';
             ctx!.textBaseline = 'middle';
@@ -163,79 +163,56 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
         };
 
         const synthMimeType = getMimeType();
-        const stream = synthCanvas.captureStream(Math.min(fps, 30));
+        const synthFps = Math.min(fps, 30);
+        const captureInterval = 1000 / synthFps; // ms
+        const stream = synthCanvas.captureStream(synthFps);
         const recorder = new MediaRecorder(stream, { mimeType: synthMimeType });
         const synthChunks: Blob[] = [];
 
         recorder.ondataavailable = (e: BlobEvent) => {
           if (e.data.size > 0) synthChunks.push(e.data);
         };
-
         recorder.onstop = () => {
           URL.revokeObjectURL(url);
-          const blob = new Blob(synthChunks, { type: synthMimeType });
-          resolve(blob);
+          resolve(new Blob(synthChunks, { type: synthMimeType }));
         };
 
         // 开始录制
         recorder.start(100);
 
-        // 逐帧 Seek 合成（比 play-through 更准确，不受播放速率影响）
-        const duration = playbackVideo.duration;
-        const step = 1 / fps; // 每帧间隔（秒）
-        const totalFrames = Math.ceil(duration / step);
-        let frameIndex = 0;
+        // 自然播放 + rAF 捕获
+        // playbackRate=1.5: 30s 视频 → 20s 合成，不触发解码器压力
+        playbackVideo.playbackRate = 1.5;
+        let lastCapture = -captureInterval;
+        let synthRaf = 0;
 
-        const captureFrame = () => {
-          if (frameIndex >= totalFrames) {
+        const synthTick = () => {
+          if (playbackVideo.paused || playbackVideo.ended) {
             recorder.stop();
             return;
           }
 
-          const targetTime = frameIndex * step;
-          // 避免最后一帧超出时长
-          if (targetTime > duration) {
-            recorder.stop();
-            return;
+          const now = playbackVideo.currentTime * 1000;
+          if (now - lastCapture >= captureInterval) {
+            lastCapture = now;
+            ctx.drawImage(playbackVideo, 0, 0, synthCanvas.width, synthCanvas.height);
+            const matched = findMarkers(playbackVideo.currentTime);
+            if (matched && matched.length > 0) drawMarkers(matched);
+            // 水印
+            ctx.fillStyle = 'rgba(255,255,255,0.4)';
+            ctx.font = 'bold 14px Inter, system-ui, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillText('AI 抱石教练 · 专业版', 16, 16);
           }
-
-          playbackVideo.currentTime = targetTime;
+          synthRaf = requestAnimationFrame(synthTick);
         };
 
-        playbackVideo.onseeked = () => {
-          // 绘制视频帧
-          ctx.drawImage(playbackVideo, 0, 0, synthCanvas.width, synthCanvas.height);
-
-          // 绘制标注
-          const matched = findMarkers(playbackVideo.currentTime);
-          if (matched && matched.length > 0) {
-            drawMarkers(matched, synthCanvas.width, synthCanvas.height);
-          }
-
-          // 水印
-          ctx.fillStyle = 'rgba(255,255,255,0.4)';
-          ctx.font = 'bold 14px Inter, system-ui, sans-serif';
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'top';
-          ctx.fillText('AI 抱石教练 · 专业版', 16, 16);
-
-          frameIndex++;
-          // 微延迟让 MediaRecorder 有时间捕获帧
-          setTimeout(captureFrame, 30);
-        };
-
-        playbackVideo.onerror = () => {
-          URL.revokeObjectURL(url);
-          reject(new Error('Playback video load failed'));
-        };
-
-        captureFrame();
+        playbackVideo.onerror = () => { cancelAnimationFrame(synthRaf); URL.revokeObjectURL(url); reject(new Error('Playback failed')); };
+        playbackVideo.play().then(() => { synthRaf = requestAnimationFrame(synthTick); }).catch(reject);
       };
 
-      playbackVideo.onerror = () => {
-        URL.revokeObjectURL(url);
-        reject(new Error('Failed to load raw video for synthesis'));
-      };
+      playbackVideo.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Failed to load raw video')); };
     });
   }, [fps]);
 

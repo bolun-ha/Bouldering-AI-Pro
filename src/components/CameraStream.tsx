@@ -118,6 +118,7 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
   const STUCK_Y_THRESHOLD = 0.008; // Y 轴变化 < 0.8% 视为静止
   const STUCK_TIME_MS = 3000;     // 持续 3 秒视为卡关
   const FALL_Y_DROP = 0.15;       // Y 快速下降 > 15%
+  const FALL_MAX_SANE = 0.5;      // 单帧 Y 下降 > 50% → 姿态突变（挂脚/倒吊），非掉落
 
   // 卡关状态机
   const stillAccumMsRef = useRef(0); // 持续静止的毫秒数（用 Date.now delta 计算）
@@ -337,9 +338,15 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
                   if (prev.hipCenterY >= 0 && curr.hipCenterY >= 0) {
                     const yDelta = curr.hipCenterY - prev.hipCenterY;
                     if (yDelta > FALL_Y_DROP) {
-                      fallTriggeredRef.current = true;
-                      console.warn('[CameraStream] 掉落检测触发! Y drop:', yDelta);
-                      onFall(buf);
+                      // 速度校验（防挂脚/倒吊误报）：单帧 Y 下降 > 50%（FALL_MAX_SANE）
+                      // → 姿态突变（身体上下翻转），非真实掉落
+                      if (yDelta < FALL_MAX_SANE) {
+                        fallTriggeredRef.current = true;
+                        console.warn('[CameraStream] 掉落检测触发! Y drop:', yDelta);
+                        onFall(buf);
+                      } else {
+                        console.warn('[CameraStream] Y 下降过快，可能挂脚/倒吊，忽略:', yDelta);
+                      }
                     }
                   }
                 }
