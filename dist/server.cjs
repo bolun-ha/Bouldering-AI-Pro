@@ -30,7 +30,7 @@ var import_dotenv = __toESM(require("dotenv"), 1);
 var import_crypto = __toESM(require("crypto"), 1);
 var import_jsonrepair = require("jsonrepair");
 import_dotenv.default.config();
-var scriptDir = import_path.default.dirname(process.argv[1] || "");
+var scriptDir = typeof __dirname !== "undefined" ? __dirname : import_path.default.dirname(process.argv[1] || "");
 var app = (0, import_express.default)();
 var PORT = 3003;
 app.use(import_express.default.json({ limit: "10mb" }));

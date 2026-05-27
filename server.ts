@@ -11,7 +11,10 @@ dotenv.config();
 // 获取当前脚本所在目录（兼容 ESM/tsx 和 CJS 产物）
 // - tsx dev: process.argv[1] = "server.ts" → dirname = "." → index.html 在 dist/ 不存在 → Vite 中间件
 // - CJS prod (ECS): process.argv[1] = "/var/www/dist/server.cjs" → dirname = "/var/www/dist/" → index.html 存在 → express.static
-const scriptDir = path.dirname(process.argv[1] || '');
+// - 使用 __dirname 兜底（CJS 产物可靠），process.argv[1] 用于 tsx dev
+const scriptDir = typeof __dirname !== 'undefined'
+  ? __dirname
+  : path.dirname(process.argv[1] || '');
 
 const app = express();
 const PORT = 3003;

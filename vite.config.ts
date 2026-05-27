@@ -14,6 +14,7 @@ export default defineConfig(() => {
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      allowedHosts: true, // 允许任意域名（包括自定义域名 boulderi.bolunta.top）
     },
   };
 });

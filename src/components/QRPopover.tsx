@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import QRCode from 'qrcode';
 import { X } from 'lucide-react';
 
-const SITE_URL = 'https://boulderi.netlify.app';
+const SITE_URL = 'https://boulderi.bolunta.top';
 
 interface QRPopoverProps {
   isOpen: boolean;
@@ -124,7 +124,7 @@ export function QRPopover({ isOpen, onClose, xiaohongshuQR }: QRPopoverProps) {
                 </div>
               )}
               <p className="text-[10px] font-mono text-slate-600 mt-2">
-                扫码打开或访问 boulderi.netlify.app
+                扫码打开或访问 boulderi.bolunta.top
               </p>
             </div>
 

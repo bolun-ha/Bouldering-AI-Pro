@@ -51,11 +51,12 @@ export const Overlay: React.FC<OverlayProps> = ({ markers }) => {
       <AnimatePresence>
         {laidOut.map((marker) => (
           <motion.div
-            key={`${marker.x}-${marker.y}-${marker.label}`}
-            initial={{ opacity: 0 }}
+            // 用 label 做 key，不用坐标——防 MediaPipe 帧抖动导致 key 变化、组件销毁重建闪白
+            key={`marker-${marker.label}`}
+            initial={false}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: 0.15 }}
             style={{ 
               left: `${marker.x}%`, 
               top: `${marker.y + marker.offsetY}%`, 
