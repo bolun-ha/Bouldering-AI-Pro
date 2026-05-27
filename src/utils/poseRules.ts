@@ -144,38 +144,44 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
   }
 
   // ─── 4. 肩部耸肩检测 ──────────────────────────────────────────
-  const nose = get(LANDMARK.NOSE);
-  const leftEar = get(LANDMARK.LEFT_EAR);
-  const rightEar = get(LANDMARK.RIGHT_EAR);
-  for (const [side, shoulder] of [
-    ['左', LANDMARK.LEFT_SHOULDER] as const,
-    ['右', LANDMARK.RIGHT_SHOULDER] as const,
-  ]) {
-    const s = get(shoulder);
-    if (!s) continue;
+  // 用肩髋距离比替代耳朵/鼻子参考，不依赖面部器官，从背后也稳定
+  // 原理：耸肩时肩膀上移，同侧肩髋距离增大 → 与另一侧的比例失衡
+  const lShoulderPt = get(LANDMARK.LEFT_SHOULDER);
+  const rShoulderPt = get(LANDMARK.RIGHT_SHOULDER);
+  if (lShoulderPt && rShoulderPt && lHip && rHip) {
+    const hipMidY = (lHip.y + rHip.y) / 2;
+    // 双肩各自到髋中点的垂直距离
+    const lTorso = hipMidY - lShoulderPt.y;
+    const rTorso = hipMidY - rShoulderPt.y;
+    const avgTorso = (lTorso + rTorso) / 2;
 
-    // 正面（鼻子可见）：肩膀应明显低于鼻尖
-    if (nose && s.y < nose.y + 0.01) {
-      markers.push({
-        x: s.x * 100,
-        y: s.y * 100,
-        type: 'warning',
-        label: `${side}肩耸肩`,
-        description: `${side}肩膀位置偏高，肩胛骨未下沉。建议沉肩收紧背肌，再发力移动。`,
-      });
-      continue;
-    }
+    if (avgTorso > 0.02) {
+      // 单侧耸肩：一侧肩髋距离显著大于另一侧
+      for (const [side, torso, pt] of [
+        ['左', lTorso, lShoulderPt] as const,
+        ['右', rTorso, rShoulderPt] as const,
+      ]) {
+        if (torso > avgTorso * 1.3) {
+          markers.push({
+            x: pt.x * 100,
+            y: pt.y * 100,
+            type: 'warning',
+            label: `${side}肩耸肩`,
+            description: `${side}肩膀位置偏高，肩胛骨未下沉。建议沉肩收紧背肌，再发力移动。`,
+          });
+        }
+      }
 
-    // 背面（耳朵可见）：从背后看耸肩 = 肩膀靠近耳朵
-    const ear = side === '左' ? leftEar : rightEar;
-    if (ear && s.y < ear.y + 0.03) {
-      markers.push({
-        x: s.x * 100,
-        y: s.y * 100,
-        type: 'warning',
-        label: `${side}肩耸肩`,
-        description: `${side}肩膀位置偏高，肩胛骨未下沉。建议沉肩收紧背肌，再发力移动。`,
-      });
+      // 双侧耸肩：平均肩髋距离异常大（参考：正常 ~0.08-0.12，耸肩 >0.16）
+      if (avgTorso > 0.16 && markers.length === 0) {
+        markers.push({
+          x: ((lShoulderPt.x + rShoulderPt.x) / 2) * 100,
+          y: ((lShoulderPt.y + rShoulderPt.y) / 2) * 100,
+          type: 'warning',
+          label: '双侧耸肩',
+          description: '双肩明显抬高，肩胛骨未下沉。建议沉肩收紧背肌，再发力移动。',
+        });
+      }
     }
   }
 

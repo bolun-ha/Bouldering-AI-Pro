@@ -249,25 +249,24 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
           const video = videoRef.current;
           if (!video || video.readyState < 2) return;
 
-          // 保证时间戳严格单调递增（Pose + Hand 内部 MediaPipe 图可能共享时间轴）
-          const poseTs = Math.floor(Math.max(timestamp, monotonicTsRef.current + 1));
-          monotonicTsRef.current = poseTs;
-          const handTs = poseTs + 3; // Hand 用稍大的时间戳，不与 pose 冲突
+          // 共享同一严格单调递增的时间戳，Pose 和 Hand 串行使用
+          const currentTs = Math.floor(Math.max(timestamp, monotonicTsRef.current + 1));
+          monotonicTsRef.current = currentTs;
 
           // Pose 检测
           if (timestamp - lastPoseTime >= poseInterval) {
             lastPoseTime = timestamp;
-            const poseRes = detectPose(video, poseTs);
+            const poseRes = detectPose(video, currentTs);
             if (poseRes) {
               poseLandmarksRef.current = poseRes.landmarks;
             }
           }
 
-          // Hand 检测
+          // Hand 检测（与 Pose 共享同一时间戳，串行执行防止 Wasm 内部时序紊乱）
           let handsThisFrame: HandRes[] | undefined;
           if (timestamp - lastHandTime >= handInterval) {
             lastHandTime = timestamp;
-            const handRes = detectHands(video, handTs);
+            const handRes = detectHands(video, currentTs);
             handResultsRef.current = handRes as unknown as HandRes[];
             handsThisFrame = handRes.length > 0 ? (handRes as unknown as HandRes[]) : undefined;
           }
@@ -419,14 +418,27 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
     onFrameRef.current(canvas, poseSnapshot, handSnapshot);
   }, []); // 空依赖：onFrame 通过 ref 获取最新值，避免 interval 重建
 
-  // ─── 录制时周期性截帧 ─────────────────────────────────────
+  // ─── 链式截帧分析 ───────────────────────────────────────
+  // 用递归 setTimeout 替代 setInterval，确保上次分析完全落地后才启动下一次
+  // handleFrame 内部已有 isAnalyzing 锁做并发防护，链式调用更加健壮
   useEffect(() => {
-    let intervalId: number;
-    if (isRecording) {
-      intervalId = window.setInterval(captureFrame, captureInterval);
-    }
+    if (!isRecording) return;
+    let timeoutId: number;
+
+    const scheduleNext = () => {
+      timeoutId = window.setTimeout(() => {
+        if (!isRecordingRef.current) return;
+        captureFrame();
+        scheduleNext();
+      }, captureInterval);
+    };
+
+    // 立即开始第一次截帧
+    captureFrame();
+    scheduleNext();
+
     return () => {
-      if (intervalId) clearInterval(intervalId);
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, [isRecording, captureFrame, captureInterval]);
 

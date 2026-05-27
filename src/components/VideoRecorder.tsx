@@ -156,9 +156,8 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
       rawChunksRef.current = [];
       isRecordingRef.current = true;
 
-      // 匹配 video 尺寸
-      // 设为摄像头原生分辨率，上限 1080p
-      const maxDim = 1080;
+      // 匹配 video 尺寸（降至 640p 减少 Canvas 重绘负载，手机攀爬时不掉帧）
+      const maxDim = 640;
       let w = video.videoWidth || 1280;
       let h = video.videoHeight || 720;
       if (w > maxDim || h > maxDim) {
