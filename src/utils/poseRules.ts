@@ -80,15 +80,15 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
   // ─── 2. 肘部——删除单一角度检测，替换为「鸡翅膀（肘部外扩）」检测
   // 攀岩中折肘锁（lock-off）在屋檐/仰角墙上是标准技术
   // 真正的肘部 Error 是侧拉时肘关节向外支开，未内收夹紧，导致肩关节压力暴增
-  for (const [side, shoulder, elbow, wrist, hip] of [
-    ['左', LANDMARK.LEFT_SHOULDER, LANDMARK.LEFT_ELBOW, LANDMARK.LEFT_WRIST, LANDMARK.LEFT_HIP] as const,
-    ['右', LANDMARK.RIGHT_SHOULDER, LANDMARK.RIGHT_ELBOW, LANDMARK.RIGHT_WRIST, LANDMARK.RIGHT_HIP] as const,
+  // 不依赖臀部可见性（上肢检测 = 只看上肢）
+  for (const [side, shoulder, elbow, wrist] of [
+    ['左', LANDMARK.LEFT_SHOULDER, LANDMARK.LEFT_ELBOW, LANDMARK.LEFT_WRIST] as const,
+    ['右', LANDMARK.RIGHT_SHOULDER, LANDMARK.RIGHT_ELBOW, LANDMARK.RIGHT_WRIST] as const,
   ]) {
     const s = get(shoulder);
     const e = get(elbow);
     const w = get(wrist);
-    const h = get(hip);
-    if (!s || !e || !w || !h) continue;
+    if (!s || !e || !w) continue;
 
     const elbowAngle = angleBetween(s, e, w);
     angleLogs.push(`${side}肘角=${elbowAngle.toFixed(1)}°`);
@@ -177,11 +177,17 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
   }
   // 用肩髋距离比替代耳朵/鼻子参考，不依赖面部器官，从背后也稳定
   // 原理：耸肩时肩膀上移，同侧肩髋距离增大 → 与另一侧的比例失衡
+  // 不依赖臀部可见性：当臀不可见时，用双肩中点做 baseline 代替髋中点
   const lShoulderPt = get(LANDMARK.LEFT_SHOULDER);
   const rShoulderPt = get(LANDMARK.RIGHT_SHOULDER);
-  if (lShoulderPt && rShoulderPt && lHip && rHip) {
-    const hipMidY = (lHip.y + rHip.y) / 2;
-    // 双肩各自到髋中点的垂直距离
+  if (lShoulderPt && rShoulderPt) {
+    const lHipPt = get(LANDMARK.LEFT_HIP);
+    const rHipPt = get(LANDMARK.RIGHT_HIP);
+    const hipMidY = (lHipPt && rHipPt && lHipPt.visibility! > 0.3 && rHipPt.visibility! > 0.3)
+      ? (lHipPt.y + rHipPt.y) / 2  // 髋可见 → 用髋中点（最准）
+      : Math.max(lShoulderPt.y, rShoulderPt.y) + 0.15;  // 髋不可见 → 用肩下 15% 估测
+
+    // 双肩各自到中点的垂直距离
     const lTorso = hipMidY - lShoulderPt.y;
     const rTorso = hipMidY - rShoulderPt.y;
     const avgTorso = (lTorso + rTorso) / 2;
@@ -236,7 +242,96 @@ export function analyzePose(landmarks: NormalizedLandmark[]): RuleResult {
     }
   }
 
-  // ─── 7. 限制最大显示标注数 ─────────────────────────────────────
+  // ─── 6. 折腕（手腕内扣）───────────────────────────────────────
+  // 抓点时手腕向手心方向弯折 → 腕关节承压极大，易扭伤/腱鞘炎
+  // 检测：肘-腕-手指基底三点角度 < 140° = 手腕过度弯曲
+  for (const [side, elbow, wrist, handTip] of [
+    ['左', LANDMARK.LEFT_ELBOW, LANDMARK.LEFT_WRIST, LANDMARK.LEFT_INDEX] as const,
+    ['右', LANDMARK.RIGHT_ELBOW, LANDMARK.RIGHT_WRIST, LANDMARK.RIGHT_INDEX] as const,
+  ]) {
+    const e = get(elbow);
+    const w = get(wrist);
+    const h = get(handTip);
+    if (e && w && h) {
+      const wristAngle = angleBetween(e, w, h);
+      angleLogs.push(`${side}腕角=${wristAngle.toFixed(1)}°`);
+      if (wristAngle < 140) {
+        markers.push({
+          x: w.x * 100,
+          y: w.y * 100,
+          type: 'warning',
+          label: `${side}折腕`,
+          description: `${side}手腕向手心弯折（${wristAngle.toFixed(0)}°），腕关节受力过大。建议保持手腕中立伸直，调整站位而非硬扭手腕。`,
+        });
+      }
+    }
+  }
+
+  // ─── 7. 只用脚尖踮踩 ──────────────────────────────────────────
+  // 脚跟抬起过高，只有脚尖搭岩点 → 发力不稳易打滑
+  // 检测：脚跟 y > 脚趾 y（脚跟比脚尖高），差值 > 3% 帧高
+  for (const [side, heel, footIdx] of [
+    ['左', LANDMARK.LEFT_HEEL, LANDMARK.LEFT_FOOT_INDEX] as const,
+    ['右', LANDMARK.RIGHT_HEEL, LANDMARK.RIGHT_FOOT_INDEX] as const,
+  ]) {
+    const he = get(heel);
+    const fi = get(footIdx);
+    if (he && fi) {
+      const tiptoe = fi.y - he.y; // 正 = 脚跟高于脚尖
+      if (tiptoe > 0.03) {
+        markers.push({
+          x: fi.x * 100,
+          y: fi.y * 100,
+          type: 'warning',
+          label: `${side}脚尖踮踩`,
+          description: `${side}脚跟抬起过高，仅脚尖搭点。建议全脚掌/前脚掌踏实，脚跟下沉让岩鞋橡胶贴合岩面。`,
+        });
+      }
+    }
+  }
+
+  // ─── 8. 身体外仰（胸口远离岩壁）─────────────────────────────
+  // 胯部向后撅、胸口远离岩壁 → 全身重量压在手臂，小臂爆力
+  // 检测：肩 z 比髋 z 明显更靠前（接近摄像头）= 上半身后仰
+  if (lShoulder && rShoulder && lHip && rHip) {
+    const avgShoulderZ = (lShoulder.z + rShoulder.z) / 2;
+    const avgHipZ = (lHip.z + rHip.z) / 2;
+    const leanZ = avgShoulderZ - avgHipZ;
+    angleLogs.push(`身体仰角z=${leanZ.toFixed(3)}`);
+    if (leanZ > 0.06) {
+      markers.push({
+        x: ((lShoulder.x + rShoulder.x) / 2) * 100,
+        y: ((lShoulder.y + rShoulder.y) / 2) * 100,
+        type: 'error',
+        label: '身体外仰',
+        description: '上半身后仰远离岩壁，全身重量压在手臂。建议胯贴墙面，把体重转移到腿上。',
+      });
+    }
+  }
+
+  // ─── 9. 手臂锁弯（全程不放松）─────────────────────────────
+  // 双肘同时弯曲 > 硬拉型爬法，手臂肌群无法休息
+  // 检测：双肘角同时 < 150° = 一直挂在手臂上
+  const lElbowPt = get(LANDMARK.LEFT_ELBOW);
+  const rElbowPt = get(LANDMARK.RIGHT_ELBOW);
+  const lWristPt = get(LANDMARK.LEFT_WRIST);
+  const rWristPt = get(LANDMARK.RIGHT_WRIST);
+  if (lShoulderPt && rShoulderPt && lElbowPt && rElbowPt && lWristPt && rWristPt) {
+    const lElbAng = angleBetween(lShoulderPt, lElbowPt, lWristPt);
+    const rElbAng = angleBetween(rShoulderPt, rElbowPt, rWristPt);
+    angleLogs.push(`左肘角=${lElbAng.toFixed(1)}° 右肘角=${rElbAng.toFixed(1)}° 双肘锁=${lElbAng < 150 && rElbAng < 150 ? '是' : '否'}`);
+    if (lElbAng < 150 && rElbAng < 150) {
+      markers.push({
+        x: ((lElbowPt.x + rElbowPt.x) / 2) * 100,
+        y: ((lElbowPt.y + rElbowPt.y) / 2) * 100,
+        type: 'warning',
+        label: '手臂锁弯',
+        description: '双肘同时弯曲，靠手臂拉拽发力。建议蹬腿推起身体，手臂尽量伸直放松卸力。',
+      });
+    }
+  }
+
+  // ─── 10. 限制最大显示标注数 ────────────────────────────────────
   // 手机屏幕小，标注太多反而看不清。策略：最多 2 个，error 优先
   const MAX_MARKERS = 2;
   const errors = markers.filter(m => m.type === 'error');

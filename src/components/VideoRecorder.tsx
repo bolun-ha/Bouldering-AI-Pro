@@ -50,6 +50,8 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
   const isRecordingRef = useRef<boolean>(false);
   const completedRef = useRef(false);
   const markerTimelineRef = useRef<{ time: number; markers: Marker[] }[]>([]);
+  const rawRafRef = useRef<number>(0);
+  const rawCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // ── 标注时间轴：每次 markers 变化时记录当前视频时间 ──────
   useEffect(() => {
@@ -216,6 +218,35 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
     });
   }, [fps]);
 
+  // ── Canvas captureStream 兜底录制（iOS 上 video.captureStream 可能返回空流）
+  // 在不可用的设备上降级为：rAF 持续 drawImage → canvas.captureStream → MediaRecorder
+  const startRawCanvasCapture = useCallback((videoEl: HTMLVideoElement) => {
+    const rawCanvas = document.createElement('canvas');
+    rawCanvas.width = videoEl.videoWidth || 1280;
+    rawCanvas.height = videoEl.videoHeight || 720;
+    rawCanvasRef.current = rawCanvas;
+
+    const ctx = rawCanvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    const stream = rawCanvas.captureStream(30);
+    if (stream.getVideoTracks().length === 0) return;
+
+    const rawRecorder = new MediaRecorder(stream, { mimeType: mimeTypeRef.current });
+    rawRecorder.ondataavailable = (e: BlobEvent) => {
+      if (e.data.size > 0) rawChunksRef.current.push(e.data);
+    };
+    rawRecorder.start(200);
+    rawRecorderRef.current = rawRecorder;
+
+    const draw = () => {
+      if (!isRecordingRef.current) return;
+      ctx.drawImage(videoEl, 0, 0, rawCanvas.width, rawCanvas.height);
+      rawRafRef.current = requestAnimationFrame(draw);
+    };
+    rawRafRef.current = requestAnimationFrame(draw);
+  }, []);
+
   // ── 录制主逻辑 ─────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -258,19 +289,26 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
       if (video.captureStream) {
         try {
           const rawStream = video.captureStream();
-          const rawRecorder = new MediaRecorder(rawStream, { mimeType });
-          rawRecorderRef.current = rawRecorder;
-
-          rawRecorder.ondataavailable = (e: BlobEvent) => {
-            if (e.data.size > 0) rawChunksRef.current.push(e.data);
-          };
-
-          rawRecorder.start(200);
-          console.log('[VideoRecorder] 原始视频录制已启动');
+          // iOS Safari: captureStream 可能返回无 video track 的空流
+          if (rawStream.getVideoTracks().length === 0) {
+            console.warn('[VideoRecorder] captureStream empty tracks, fallback to canvas');
+            startRawCanvasCapture(video);
+          } else {
+            const rawRecorder = new MediaRecorder(rawStream, { mimeType });
+            rawRecorderRef.current = rawRecorder;
+            rawRecorder.ondataavailable = (e: BlobEvent) => {
+              if (e.data.size > 0) rawChunksRef.current.push(e.data);
+            };
+            rawRecorder.start(200);
+            console.log('[VideoRecorder] 原始视频录制已启动');
+          }
         } catch (err) {
           console.error('启动原始视频录制失败:', err);
-          rawRecorderRef.current = null;
+          startRawCanvasCapture(video);
         }
+      } else {
+        // 不支持 captureStream → 用 canvas 录制
+        startRawCanvasCapture(video);
       }
 
       // 不在此处启动 Canvas 合成！全部在 offline 阶段完成
@@ -290,6 +328,7 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
     // ── 停止录制 → 离线合成标注版 ──────────────────────
     return () => {
       isRecordingRef.current = false;
+      cancelAnimationFrame(rawRafRef.current);
       if (completedRef.current) return;
       completedRef.current = true;
 

@@ -125,6 +125,8 @@ interface CameraStreamProps {
   /** 掉落时触发：传入缓冲区帧供自动复盘 */
   onFall?: (buffer: FrameBufferEntry[]) => void;
   isRecording: boolean;
+  /** 是否启动摄像头 + 检测循环。由父组件控制（用户点击"开始攀爬"后再启动） */
+  cameraStarted: boolean;
   captureInterval?: number;
   onError?: (error: string) => void;
   onVideoReady?: (video: HTMLVideoElement) => void;
@@ -136,12 +138,14 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
   onStuck,
   onFall,
   isRecording,
+  cameraStarted,
   captureInterval = 2000,
   onError,
   onVideoReady,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const triangleCanvasRef = useRef<HTMLCanvasElement>(null);
   const poseLandmarksRef = useRef<NormalizedLandmark[]>([]);
   const handResultsRef = useRef<HandRes[]>([]);
   const poseActiveRef = useRef(false);
@@ -217,8 +221,99 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
         }
       }
     }
-    setupCamera();
-  }, [onError, onVideoReady]);
+    if (cameraStarted) {
+      setupCamera();
+    }
+  }, [onError, onVideoReady, cameraStarted]);
+
+  // ─── 三角重心标注（攀岩三点支撑） ──────────────────────────
+  // 支撑三点按优先级匹配 6 种组合，自动识别当前手脚着壁状态
+  // 组合:
+  //   1) 左腕+右腕+左踝    2) 左腕+右腕+右踝
+  //   3) 左腕+左踝+右踝    4) 右腕+左踝+右踝
+  //   5) 双腕中点+左踝+右踝  6) 左腕+右腕+双踝中点
+  // 三角内心 ≈ 人体静态重心估算点
+  const drawTriangle = useCallback(() => {
+    const canvas = triangleCanvasRef.current;
+    const video = videoRef.current;
+    if (!canvas || !video) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const lm = poseLandmarksRef.current;
+    if (lm.length < 33) return;
+
+    const lWrist = lm[LANDMARK.LEFT_WRIST];
+    const rWrist = lm[LANDMARK.RIGHT_WRIST];
+    const lAnkle = lm[LANDMARK.LEFT_ANKLE];
+    const rAnkle = lm[LANDMARK.RIGHT_ANKLE];
+
+    if (!lWrist || !rWrist || !lAnkle || !rAnkle) return;
+
+    const vis = (l: NormalizedLandmark) => l.visibility === undefined || l.visibility! > 0.3;
+    const lwOk = vis(lWrist);
+    const rwOk = vis(rWrist);
+    const laOk = vis(lAnkle);
+    const raOk = vis(rAnkle);
+
+    const wristMid = { x: (lWrist.x + rWrist.x) / 2, y: (lWrist.y + rWrist.y) / 2 };
+    const ankleMid = { x: (lAnkle.x + rAnkle.x) / 2, y: (lAnkle.y + rAnkle.y) / 2 };
+
+    type Combo = { pts: { x: number; y: number }[]; labels: string[] };
+    const tryCombos = (): Combo | null => {
+      if (lwOk && rwOk && laOk)
+        return { pts: [lWrist, rWrist, lAnkle], labels: ['左腕', '右腕', '左踝'] };
+      if (lwOk && rwOk && raOk)
+        return { pts: [lWrist, rWrist, rAnkle], labels: ['左腕', '右腕', '右踝'] };
+      if (lwOk && laOk && raOk)
+        return { pts: [lWrist, lAnkle, rAnkle], labels: ['左腕', '左踝', '右踝'] };
+      if (rwOk && laOk && raOk)
+        return { pts: [rWrist, lAnkle, rAnkle], labels: ['右腕', '左踝', '右踝'] };
+      if ((lwOk || rwOk) && laOk && raOk) {
+        const h = lwOk && rwOk ? wristMid : (lwOk ? lWrist : rWrist);
+        return { pts: [h, lAnkle, rAnkle], labels: ['双手', '左踝', '右踝'] };
+      }
+      if (lwOk && rwOk && (laOk || raOk)) {
+        const f = laOk && raOk ? ankleMid : (laOk ? lAnkle : rAnkle);
+        return { pts: [lWrist, rWrist, f], labels: ['左腕', '右腕', '双脚'] };
+      }
+      return null;
+    };
+
+    const combo = tryCombos();
+    if (!combo) return;
+
+    const cW = canvas.width;
+    const cH = canvas.height;
+
+    const pts = combo.pts.map(p => {
+      const { x, y } = adjustCoords(video, p.x, p.y);
+      return { x: x * cW, y: y * cH };
+    });
+
+    ctx.strokeStyle = 'rgba(255, 40, 40, 0.7)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.lineTo(pts[1].x, pts[1].y);
+    ctx.lineTo(pts[2].x, pts[2].y);
+    ctx.closePath();
+    ctx.stroke();
+
+    pts.forEach((p) => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#ff3344';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    });
+
+  }, []);
 
   // ─── MediaPipe Pose + Hands 检测循环 ──────────────────────
   useEffect(() => {
@@ -273,7 +368,6 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
       const cutoff = Date.now() - FRAME_BUFFER_SECONDS * 1000;
       frameBufferRef.current = frameBufferRef.current.filter(e => e.timestamp > cutoff);
 
-      return entry;
     }
 
     async function startDetection() {
@@ -330,6 +424,19 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
               return { ...m, x: x * 100, y: y * 100 };
             });
             onPoseMarkers(adjusted, poseLandmarksRef.current, handsThisFrame);
+          }
+
+          // ── 三角重心标注（实时绘制，不依赖录制状态） ──────────
+          // 无论是否录制，都持续显示三角重心，帮助用户感知身体姿态变化
+          const triCanvas = triangleCanvasRef.current;
+          if (triCanvas && video) {
+            // 确保 canvas 尺寸与容器匹配
+            const parent = triCanvas.parentElement;
+            if (parent && (triCanvas.width !== parent.clientWidth || triCanvas.height !== parent.clientHeight)) {
+              triCanvas.width = parent.clientWidth;
+              triCanvas.height = parent.clientHeight;
+            }
+            drawTriangle();
           }
 
           // ── 卡关检测 ────────────────────────────────────────
@@ -428,13 +535,15 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
       }
     }
 
-    startDetection();
+    if (cameraStarted) {
+      startDetection();
+    }
 
     return () => {
       poseActiveRef.current = false;
       cancelAnimationFrame(rafId);
     };
-  }, [onPoseMarkers, onStuck, onFall]);
+  }, [onPoseMarkers, onStuck, onFall, cameraStarted]);
 
   // ─── 截帧分析（帧 + 骨骼 + 手势）─────────────────────────
   const captureFrame = useCallback(() => {
@@ -501,6 +610,11 @@ export const CameraStream: React.FC<CameraStreamProps> = ({
         className="w-full h-full object-contain"
       />
       <canvas ref={canvasRef} className="hidden" />
+      <canvas
+        ref={triangleCanvasRef}
+        className="absolute inset-0 pointer-events-none"
+        style={{ zIndex: 10 }}
+      />
     </div>
   );
 };

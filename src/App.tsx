@@ -23,6 +23,7 @@ export default function App() {
   const [recordedRawBlob, setRecordedRawBlob] = useState<Blob | null>(null);
   const [mode, setMode] = useState<'camera' | 'video'>('camera');
   const [showQR, setShowQR] = useState(false);
+  const [cameraStarted, setCameraStarted] = useState(false);
   const cooldownRef = useRef(false);
   const startingRef = useRef(false); // 防快速双击开始
 
@@ -57,6 +58,7 @@ export default function App() {
     });
     setIsRecording(true);
     setCurrentResult(null);
+    setCameraStarted(true); // 启动摄像头 + 检测循环
   };
 
   // 首次访问自动弹出二维码
@@ -399,6 +401,7 @@ export default function App() {
               onStuck={handleStuck}
               onFall={handleFall}
               isRecording={isRecording}
+              cameraStarted={cameraStarted}
               captureInterval={1800}
               onError={setCameraError}
               onVideoReady={handleVideoReady}
@@ -410,7 +413,7 @@ export default function App() {
               markers={currentResult?.markers || []}
               active={isRecording}
               onRecordingComplete={handleRecordingComplete}
-              fps={15}
+              fps={30}
             />
 
             {/* Camera Error Message */}
