@@ -174,7 +174,108 @@ function extractJSON(text: string): any {
   }
 }
 
-// ─── POST /api/analyze — Frame analysis (vision) ────────────────
+// ─── 付费墙：按设备限制免费使用次数 ──────────────────────────
+// 环境变量 PAYWALL_ENABLED=true 时激活
+// 环境变量 UPSTASH_REDIS_URL 设置云端 Redis（可选，不配置则用内存计数器）
+const PAYWALL_ENABLED = process.env.PAYWALL_ENABLED === 'true';
+const PAYWALL_FREE_LIMIT = 7;
+
+type UsageStore = Record<string, number>;
+
+/** 内存计数器 — 仅用于开发/演示（不跨进程同步） */
+const memStore: UsageStore = {};
+function getRedisClient(): any | null {
+  if (!process.env.UPSTASH_REDIS_URL) return null;
+  try {
+    // 动态导入 @upstash/redis，不强制依赖
+    const { Redis } = require('@upstash/redis');
+    return new Redis({ url: process.env.UPSTASH_REDIS_URL, token: process.env.UPSTASH_REDIS_TOKEN || '' });
+  } catch {
+    console.warn('[Paywall] @upstash/redis 未安装，使用内存计数器（重启会重置）');
+    return null;
+  }
+}
+const redisClient = getRedisClient();
+
+/** 获取设备使用次数 */
+async function getUsageCount(deviceId: string): Promise<number> {
+  if (redisClient) {
+    const val = await redisClient.get(`usage:${deviceId}`) || 0;
+    return parseInt(val, 10);
+  }
+  return memStore[deviceId] || 0;
+}
+
+/** 增加设备使用次数 */
+async function incrementUsage(deviceId: string): Promise<number> {
+  if (redisClient) {
+    return await redisClient.incr(`usage:${deviceId}`);
+  }
+  memStore[deviceId] = (memStore[deviceId] || 0) + 1;
+  return memStore[deviceId];
+}
+
+/** 将设备标记为无限次（付费后调用） */
+async function setUnlimited(deviceId: string): Promise<void> {
+  if (redisClient) {
+    await redisClient.set(`usage:${deviceId}`, -1);
+  } else {
+    memStore[deviceId] = -1;
+  }
+}
+
+/** 付费墙中间件 —— 仅作用于 /api/analyze-stream */
+async function paywallMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (!PAYWALL_ENABLED) {
+    // 未启用：在响应头中附带默认剩余次数（用于前端 UI 展示）
+    res.setHeader('x-usage-remaining', String(PAYWALL_FREE_LIMIT));
+    res.setHeader('x-usage-blocked', 'false');
+    return next();
+  }
+
+  const deviceId = req.headers['x-device-id'] as string | undefined;
+  if (!deviceId) {
+    // 没有设备标识 → 允许通过，但不计入统计（降级行为）
+    console.warn('[Paywall] 缺少 x-device-id，放行不计次');
+    res.setHeader('x-usage-remaining', String(PAYWALL_FREE_LIMIT));
+    res.setHeader('x-usage-blocked', 'false');
+    return next();
+  }
+
+  const count = await getUsageCount(deviceId);
+  const remaining = count === -1 ? -1 : Math.max(0, PAYWALL_FREE_LIMIT - count);
+  const blocked = remaining <= 0 && count !== -1;
+
+  res.setHeader('x-usage-remaining', String(remaining));
+  res.setHeader('x-usage-blocked', String(blocked));
+  res.setHeader('x-usage-reason', blocked ? '您的免费体验次数已用完，请解锁无限次畅爬版。' : '');
+
+  if (blocked) {
+    console.log(`[Paywall] 拦截设备 ${deviceId.slice(0, 8)}…，已达上限 ${PAYWALL_FREE_LIMIT} 次`);
+    return res.status(403).json({
+      error: 'LIMIT_REACHED',
+      message: '您的免费体验次数已用完，请解锁无限次畅爬版。',
+    });
+  }
+
+  next();
+}
+
+// ─── GET /api/usage — 查询当前使用次数 ──────────────────────
+app.get('/api/usage', async (req, res) => {
+  if (!PAYWALL_ENABLED) {
+    return res.json({ remaining: PAYWALL_FREE_LIMIT, blocked: false, enabled: false });
+  }
+
+  const deviceId = req.headers['x-device-id'] as string | undefined;
+  if (!deviceId) {
+    return res.json({ remaining: PAYWALL_FREE_LIMIT, blocked: false });
+  }
+
+  const count = await getUsageCount(deviceId);
+  const remaining = count === -1 ? -1 : Math.max(0, PAYWALL_FREE_LIMIT - count);
+  res.json({ remaining, blocked: remaining <= 0 && count !== -1, enabled: true });
+});
 app.post("/api/analyze", async (req, res) => {
   try {
     const { image, pose, hands } = req.body;
@@ -473,8 +574,8 @@ app.get("/api/query-result", async (req, res) => {
   }
 });
 
-// ─── POST /api/analyze-stream — 同步流式分析（服务端收流 → 单次返回） ─
-app.post("/api/analyze-stream", async (req, res) => {
+// ─── POST /api/analyze-stream — 同步流式分析（附付费墙检查） ─
+app.post("/api/analyze-stream", paywallMiddleware, async (req, res) => {
   try {
     const { frames, prompt, motion_metadata, model = "glm-5v-turbo" } = req.body;
     if (!frames || !frames.length || !prompt) {
@@ -591,6 +692,14 @@ app.post("/api/analyze-stream", async (req, res) => {
     res.write(`data: ${JSON.stringify({ __complete: true, content: finalContent, parsed })}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
+
+    // 付费墙：成功响应后递增计数（异步，不阻塞响应）
+    if (PAYWALL_ENABLED) {
+      const deviceId = req.headers['x-device-id'] as string | undefined;
+      if (deviceId && finalContent.trim()) {
+        incrementUsage(deviceId).catch(err => console.warn('[Paywall] incr 失败:', err));
+      }
+    }
   } catch (error: any) {
     console.error("[analyze-stream] error:", error.message);
     // 如果 headers 已经发送了，只能尝试写错误事件

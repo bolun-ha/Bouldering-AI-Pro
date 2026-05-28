@@ -58,6 +58,9 @@ const ANALYZING_MESSAGES = [
   '教练正在圈出需要改进的地方...',
 ];
 
+import { prepareAnalysisHeaders } from '../utils/paywall';
+import { FEATURES } from '../config/features';
+
 export function VideoAnalysis() {
   // ── 文件 & 播放 ──
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -630,7 +633,7 @@ ${timestamps}
       try {
         const res = await fetch('/api/analyze-stream', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...prepareAnalysisHeaders() },
           signal: controller.signal,
           body: JSON.stringify({
             frames: extracted,
@@ -644,6 +647,12 @@ ${timestamps}
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
+          if (err.error === 'LIMIT_REACHED') {
+            window.dispatchEvent(new CustomEvent('paywall:trigger'));
+            setStatusText('免费次数已用完');
+            setPhase('error');
+            return;
+          }
           if (res.status === 504) {
             throw new Error('Netlify 服务器超时（10秒限制）。请使用本地开发环境 (localhost:3001) 或稍后重试。部署版不支持 10 帧以上分析。');
           }

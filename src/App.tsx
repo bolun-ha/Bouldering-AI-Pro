@@ -10,6 +10,10 @@ import { AnalysisResult, SessionData, HistoryEntry } from './types';
 import { Play, Square, ShieldCheck, Settings, History, Video, Camera } from 'lucide-react';
 import { drawMarkers } from './utils/drawMarkers';
 import { QRPopover } from './components/QRPopover';
+import { UsageBadge } from './components/UsageBadge';
+import { PaywallCard } from './components/PaywallCard';
+import { FEATURES } from './config/features';
+import { prepareAnalysisHeaders } from './utils/paywall';
 
 export default function App() {
   const [isRecording, setIsRecording] = useState(false);
@@ -24,6 +28,9 @@ export default function App() {
   const [mode, setMode] = useState<'camera' | 'video'>('camera');
   const [showQR, setShowQR] = useState(false);
   const [cameraStarted, setCameraStarted] = useState(false);
+  const [usageRemaining, setUsageRemaining] = useState<number | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [showPaywall, setShowPaywall] = useState(false);
   const cooldownRef = useRef(false);
   const startingRef = useRef(false); // 防快速双击开始
 
@@ -69,6 +76,35 @@ export default function App() {
       const t = setTimeout(() => setShowQR(true), 2000);
       return () => clearTimeout(t);
     }
+  }, []);
+
+  // ─── 付费墙：首次加载查询剩余次数 ──────────────────────
+  useEffect(() => {
+    if (!FEATURES.PAYWALL_ENABLED) return;
+    setUsageLoading(true);
+    fetch('/api/usage', {
+      headers: prepareAnalysisHeaders(),
+    })
+      .then(res => res.json())
+      .then(data => {
+        setUsageRemaining(data.remaining ?? FEATURES.PAYWALL_FREE_LIMIT);
+      })
+      .catch(() => {
+        // 静默降级
+        setUsageRemaining(FEATURES.PAYWALL_FREE_LIMIT);
+      })
+      .finally(() => setUsageLoading(false));
+  }, []);
+
+  // ─── 付费墙：监听 paywall:trigger 事件 ────────────────
+  useEffect(() => {
+    if (!FEATURES.PAYWALL_ENABLED) return;
+    const handler = () => {
+      setUsageRemaining(0);
+      setShowPaywall(true);
+    };
+    window.addEventListener('paywall:trigger', handler);
+    return () => window.removeEventListener('paywall:trigger', handler);
   }, []);
 
   const stopClimb = useCallback(() => {
@@ -383,6 +419,7 @@ export default function App() {
               <Video className="w-2.5 h-2.5" /> 视频
             </button>
           </div>
+          <UsageBadge remaining={usageRemaining} loading={usageLoading} />
           <div className="hidden sm:flex flex-col items-end">
             <span className="text-[8px] text-slate-500 uppercase font-black">云端延迟</span>
             <span className="text-[10px] font-mono text-emerald-400">1.2s</span>
@@ -564,6 +601,14 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+
+      {/* 付费弹窗 */}
+      {FEATURES.PAYWALL_ENABLED && (
+        <PaywallCard
+          isOpen={showPaywall}
+          onClose={() => setShowPaywall(false)}
+        />
+      )}
     </div>
     </>
   );
