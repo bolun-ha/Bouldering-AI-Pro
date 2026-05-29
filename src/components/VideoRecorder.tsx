@@ -188,13 +188,14 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
         };
 
         const synthMimeType = getSupportedMimeType();
-        const synthFps = Math.min(fps, 30);
+        const synthFps = Math.min(fps, 15); // 合成 fps 15 足够（标注变化慢，15fps 肉眼流畅）
         const captureInterval = 1000 / synthFps; // ms
         const stream = synthCanvas.captureStream(synthFps);
-        // 🎯 6 Mbps 高码率
+        // 合成码率 1.5Mbps（640px 视频不需要 6Mbps，高了手机编码器扛不住）
+        const synthBitrate = 1.5 * 1024 * 1024;
         const recorder = new MediaRecorder(stream, {
           mimeType: synthMimeType,
-          videoBitsPerSecond: HIGH_BITRATE,
+          videoBitsPerSecond: synthBitrate,
         });
         const synthChunks: Blob[] = [];
 
