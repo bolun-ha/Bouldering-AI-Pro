@@ -34,6 +34,7 @@ export default function App() {
   const [showPaywall, setShowPaywall] = useState(false);
   const cooldownRef = useRef(false);
   const startingRef = useRef(false); // 防快速双击开始
+  const sessionIdRef = useRef(0);     // 递增 session ID，防 stopClimb 后残留异步回调污染报告
 
   // Video 元素引用（传给 VideoRecorder 做合成录制）
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
@@ -58,6 +59,7 @@ export default function App() {
   const startClimb = () => {
     if (startingRef.current) return; // 防快速双击
     startingRef.current = true;
+    sessionIdRef.current += 1; // 新 session → 新 ID，丢弃旧 session 的残留异步回调
     cooldownRef.current = false; // 重置冷却，防上个 session 的冷却还没结束
     setRecordedVideoBlob(null);
     setRecordedRawBlob(null);
@@ -113,6 +115,7 @@ export default function App() {
 
   const stopClimb = useCallback(() => {
     startingRef.current = false; // 重置开始锁
+    sessionIdRef.current += 1; // 使当前 session 的 in-flight 请求全部失效
     setIsRecording(false);
     setCurrentResult(null); // 清除残留标注，防止报告关闭后还在显示
     setSession(prev => {
@@ -126,6 +129,7 @@ export default function App() {
 
   const handleFrame = useCallback(async (canvas: HTMLCanvasElement, landmarksSnapshot: string = '', handSnapshot: string = '') => {
     if (!isRecording || isAnalyzing || cooldownRef.current) return;
+    const mySessionId = sessionIdRef.current; // 保存当前 session ID，请求回来后检查是否已失效
 
     try {
       setIsAnalyzing(true);
@@ -148,6 +152,9 @@ export default function App() {
       }
 
       const result: AnalysisResult = await response.json();
+      // 检查 session 是否已失效（stopClimb 后 in-flight 请求的响应应丢弃）
+      if (sessionIdRef.current !== mySessionId) return;
+
       // 保留当前规则标注，仅更新 AI 分析文本（标注始终由 poseRules 控制）
       setCurrentResult(prev => {
         if (!prev) return result;

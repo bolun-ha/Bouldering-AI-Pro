@@ -31,7 +31,7 @@ const MARKER_COLORS: Record<string, { bg: string; border: string; glow: string }
  * 攀爬中：仅录制原始视频（高码率 H.264/HW 编码）
  * 同时记录标注时间轴（markerTimeline）
  *
- * 完攀后：离线回放原始视频，Canvas 合成标注版（1280×720）
+ * 完攀后：离线回放原始视频，Canvas 合成标注版（640×aspect，原始录制已为 1280×720 高码率）
  * → 输出 annotatedBlob + rawBlob 两份视频
  */
 export const VideoRecorder: React.FC<VideoRecorderProps> = ({
@@ -95,9 +95,9 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
       playbackVideo.onloadedmetadata = () => {
         const synthCanvas = document.createElement('canvas');
         const aspect = playbackVideo.videoHeight / playbackVideo.videoWidth || 1;
-        // 🎯 离线合成分辨率 1280×720（640px → 4 倍像素量）
-        synthCanvas.width = 1280;
-        synthCanvas.height = Math.round(1280 * aspect);
+        // 合成分辨率 640×aspect（原始录制已有 1280×720 高码率，合成仅渲染标注，不需要高分辨率）
+        synthCanvas.width = 640;
+        synthCanvas.height = Math.round(640 * aspect);
 
         const ctx = synthCanvas.getContext('2d', { willReadFrequently: true });
         if (!ctx) { reject(new Error('Canvas not supported')); return; }
