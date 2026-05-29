@@ -85,6 +85,11 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
   // 正解：video.play() 自然播放 → rAF 每帧判定是否捕获 → 0 解码压力
   const synthesizeAnnotatedVideo = useCallback(async (rawBlob: Blob): Promise<Blob> => {
     return new Promise((resolve, reject) => {
+      // 30 秒超时兜底：如果合成卡死（解码器锁死、rAF 不回调等），强行结束
+      const timeoutId = setTimeout(() => {
+        reject(new Error('Synthesis timeout (30s)'));
+      }, 30000);
+
       const playbackVideo = document.createElement('video');
       playbackVideo.muted = true;
       playbackVideo.playsInline = true;
@@ -93,6 +98,17 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
       playbackVideo.src = url;
 
       playbackVideo.onloadedmetadata = () => {
+        clearTimeout(timeoutId); // 视频能加载说明正常，取消超时
+        // 但需要再次设置一个新超时用于合成执行阶段
+        const execTimeoutId = setTimeout(() => {
+          origReject(new Error('Synthesis execution timeout (30s) - possible decode hang'));
+        }, 30000);
+
+        const origResolve = resolve;
+        const origReject = reject;
+        const combinedResolve = (val: Blob) => { clearTimeout(execTimeoutId); origResolve(val); };
+        const combinedReject = (err: any) => { clearTimeout(execTimeoutId); origReject(err); };
+
         const synthCanvas = document.createElement('canvas');
         const aspect = playbackVideo.videoHeight / playbackVideo.videoWidth || 1;
         // 合成分辨率 640×aspect（原始录制已有 1280×720 高码率，合成仅渲染标注，不需要高分辨率）
@@ -100,7 +116,7 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
         synthCanvas.height = Math.round(640 * aspect);
 
         const ctx = synthCanvas.getContext('2d', { willReadFrequently: true });
-        if (!ctx) { reject(new Error('Canvas not supported')); return; }
+        if (!ctx) { combinedReject(new Error('Canvas not supported')); return; }
 
         const timeline = markerTimelineRef.current;
 
@@ -187,7 +203,7 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
         };
         recorder.onstop = () => {
           URL.revokeObjectURL(url);
-          resolve(new Blob(synthChunks, { type: synthMimeType }));
+          combinedResolve(new Blob(synthChunks, { type: synthMimeType }));
         };
 
         // 开始录制
@@ -221,8 +237,8 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
           synthRaf = requestAnimationFrame(synthTick);
         };
 
-        playbackVideo.onerror = () => { cancelAnimationFrame(synthRaf); URL.revokeObjectURL(url); reject(new Error('Playback failed')); };
-        playbackVideo.play().then(() => { synthRaf = requestAnimationFrame(synthTick); }).catch(reject);
+        playbackVideo.onerror = () => { cancelAnimationFrame(synthRaf); URL.revokeObjectURL(url); combinedReject(new Error('Playback failed')); };
+        playbackVideo.play().then(() => { synthRaf = requestAnimationFrame(synthTick); }).catch(combinedReject);
       };
 
       playbackVideo.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Failed to load raw video')); };
@@ -243,15 +259,19 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
     const stream = rawCanvas.captureStream(30);
     if (stream.getVideoTracks().length === 0) return;
 
-    const rawRecorder = new MediaRecorder(stream, {
-      mimeType: mimeTypeRef.current,
-      videoBitsPerSecond: HIGH_BITRATE,
-    });
-    rawRecorder.ondataavailable = (e: BlobEvent) => {
-      if (e.data.size > 0) rawChunksRef.current.push(e.data);
-    };
-    rawRecorder.start(200);
-    rawRecorderRef.current = rawRecorder;
+    try {
+      const rawRecorder = new MediaRecorder(stream, {
+        mimeType: mimeTypeRef.current,
+        videoBitsPerSecond: HIGH_BITRATE,
+      });
+      rawRecorder.ondataavailable = (e: BlobEvent) => {
+        if (e.data.size > 0) rawChunksRef.current.push(e.data);
+      };
+      rawRecorder.start(200);
+      rawRecorderRef.current = rawRecorder;
+    } catch (err) {
+      console.warn('[VideoRecorder] Canvas兜底录制初始化失败:', err);
+    }
 
     const draw = () => {
       if (!isRecordingRef.current) return;
@@ -336,7 +356,13 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
       // 停止原始录制，获取 rawBlob
       const rawBlobPromise = new Promise<Blob | null>((resolve) => {
         if (rawRecorderRef.current && rawRecorderRef.current.state !== 'inactive') {
+          // 5 秒超时：如果 onstop 没触发，强行 resolve null
+          const timeoutId = setTimeout(() => {
+            console.warn('[VideoRecorder] 原始录制停止超时，跳过 rawBlob');
+            resolve(null);
+          }, 5000);
           rawRecorderRef.current.onstop = () => {
+            clearTimeout(timeoutId);
             const rawBlob = new Blob(rawChunksRef.current, { type: mimeTypeRef.current });
             resolve(rawBlob);
           };
