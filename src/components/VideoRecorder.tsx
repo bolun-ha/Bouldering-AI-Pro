@@ -28,10 +28,10 @@ const MARKER_COLORS: Record<string, { bg: string; border: string; glow: string }
 /**
  * 双轨录制 + 离线合成
  *
- * 攀爬中：仅录制原始视频（硬件编码，几乎无 CPU 开销）
+ * 攀爬中：仅录制原始视频（高码率 H.264/HW 编码）
  * 同时记录标注时间轴（markerTimeline）
  *
- * 完攀后：离线回放原始视频，快速 Canvas 合成标注版
+ * 完攀后：离线回放原始视频，Canvas 合成标注版（1280×720）
  * → 输出 annotatedBlob + rawBlob 两份视频
  */
 export const VideoRecorder: React.FC<VideoRecorderProps> = ({
@@ -52,6 +52,23 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
   const markerTimelineRef = useRef<{ time: number; markers: Marker[] }[]>([]);
   const rawRafRef = useRef<number>(0);
   const rawCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // ── 高码率 + H.264 优先（画质压榨核心） ────────────────
+  const HIGH_BITRATE = 6 * 1024 * 1024; // 6 Mbps
+
+  const getSupportedMimeType = () => {
+    const types = [
+      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',      // H.264 MP4（iOS 15+ WebKit 实验性支持）
+      'video/webm;codecs=h264,opus',                   // WebM 容器 H.264
+      'video/webm;codecs=vp9,opus',                    // VP9
+      'video/webm;codecs=vp8,opus',                    // VP8
+      'video/webm',                                     // 兜底
+    ];
+    for (const t of types) {
+      if (MediaRecorder.isTypeSupported(t)) return t;
+    }
+    return 'video/webm';
+  };
 
   // ── 标注时间轴：每次 markers 变化时记录当前视频时间 ──────
   useEffect(() => {
@@ -78,8 +95,9 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
       playbackVideo.onloadedmetadata = () => {
         const synthCanvas = document.createElement('canvas');
         const aspect = playbackVideo.videoHeight / playbackVideo.videoWidth || 1;
-        synthCanvas.width = 640;
-        synthCanvas.height = Math.round(640 * aspect);
+        // 🎯 离线合成分辨率 1280×720（640px → 4 倍像素量）
+        synthCanvas.width = 1280;
+        synthCanvas.height = Math.round(1280 * aspect);
 
         const ctx = synthCanvas.getContext('2d', { willReadFrequently: true });
         if (!ctx) { reject(new Error('Canvas not supported')); return; }
@@ -153,22 +171,15 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
           }
         };
 
-        const getMimeType = () => {
-          if (MediaRecorder.isTypeSupported('video/mp4')) return 'video/mp4';
-          if (MediaRecorder.isTypeSupported('video/webm;codecs=h264,opus'))
-            return 'video/webm;codecs=h264,opus';
-          if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus'))
-            return 'video/webm;codecs=vp9,opus';
-          if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'))
-            return 'video/webm;codecs=vp8,opus';
-          return 'video/webm';
-        };
-
-        const synthMimeType = getMimeType();
+        const synthMimeType = getSupportedMimeType();
         const synthFps = Math.min(fps, 30);
         const captureInterval = 1000 / synthFps; // ms
         const stream = synthCanvas.captureStream(synthFps);
-        const recorder = new MediaRecorder(stream, { mimeType: synthMimeType });
+        // 🎯 6 Mbps 高码率
+        const recorder = new MediaRecorder(stream, {
+          mimeType: synthMimeType,
+          videoBitsPerSecond: HIGH_BITRATE,
+        });
         const synthChunks: Blob[] = [];
 
         recorder.ondataavailable = (e: BlobEvent) => {
@@ -232,7 +243,10 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
     const stream = rawCanvas.captureStream(30);
     if (stream.getVideoTracks().length === 0) return;
 
-    const rawRecorder = new MediaRecorder(stream, { mimeType: mimeTypeRef.current });
+    const rawRecorder = new MediaRecorder(stream, {
+      mimeType: mimeTypeRef.current,
+      videoBitsPerSecond: HIGH_BITRATE,
+    });
     rawRecorder.ondataavailable = (e: BlobEvent) => {
       if (e.data.size > 0) rawChunksRef.current.push(e.data);
     };
@@ -266,23 +280,7 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
         return;
       }
 
-      const getMimeType = () => {
-        if (MediaRecorder.isTypeSupported('video/mp4')) return 'video/mp4';
-        console.debug('[VideoRecorder] isTypeSupported checks:',
-          'mp4:', MediaRecorder.isTypeSupported('video/mp4'),
-          'h264,opus:', MediaRecorder.isTypeSupported('video/webm;codecs=h264,opus'),
-          'vp9,opus:', MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus'),
-          'vp8,opus:', MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'));
-        if (MediaRecorder.isTypeSupported('video/webm;codecs=h264,opus'))
-          return 'video/webm;codecs=h264,opus';
-        if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus'))
-          return 'video/webm;codecs=vp9,opus';
-        if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus'))
-          return 'video/webm;codecs=vp8,opus';
-        return 'video/webm';
-      };
-
-      const mimeType = getMimeType();
+      const mimeType = getSupportedMimeType();
       mimeTypeRef.current = mimeType;
 
       // 【攀爬中】仅录制原始视频（硬件编码，不占 CPU）
@@ -294,7 +292,10 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
             console.warn('[VideoRecorder] captureStream empty tracks, fallback to canvas');
             startRawCanvasCapture(video);
           } else {
-            const rawRecorder = new MediaRecorder(rawStream, { mimeType });
+            const rawRecorder = new MediaRecorder(rawStream, {
+              mimeType,
+              videoBitsPerSecond: HIGH_BITRATE,
+            });
             rawRecorderRef.current = rawRecorder;
             rawRecorder.ondataavailable = (e: BlobEvent) => {
               if (e.data.size > 0) rawChunksRef.current.push(e.data);
@@ -313,7 +314,7 @@ export const VideoRecorder: React.FC<VideoRecorderProps> = ({
 
       // 不在此处启动 Canvas 合成！全部在 offline 阶段完成
       // Canvas 仅用作合成标注版视频的离线容器
-      const maxDim = 640;
+      const maxDim = 1280;
       let w = video.videoWidth || 1280;
       let h = video.videoHeight || 720;
       if (w > maxDim || h > maxDim) {
