@@ -25,6 +25,7 @@ export default function App() {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [recordedVideoBlob, setRecordedVideoBlob] = useState<Blob | null>(null);
   const [recordedRawBlob, setRecordedRawBlob] = useState<Blob | null>(null);
+  const [synthesizing, setSynthesizing] = useState(false);
   const [mode, setMode] = useState<'camera' | 'video'>('camera');
   const [showQR, setShowQR] = useState(false);
   const [cameraStarted, setCameraStarted] = useState(false);
@@ -51,6 +52,7 @@ export default function App() {
   const handleRecordingComplete = useCallback((result: { annotatedBlob: Blob; rawBlob: Blob }) => {
     setRecordedVideoBlob(result.annotatedBlob);
     setRecordedRawBlob(result.rawBlob);
+    setSynthesizing(false);
   }, []);
 
   const startClimb = () => {
@@ -58,6 +60,8 @@ export default function App() {
     startingRef.current = true;
     cooldownRef.current = false; // 重置冷却，防上个 session 的冷却还没结束
     setRecordedVideoBlob(null);
+    setRecordedRawBlob(null);
+    setSynthesizing(false);
     setSession({
       startTime: Date.now(),
       totalErrors: 0,
@@ -115,6 +119,7 @@ export default function App() {
       if (!prev) return prev;
       return { ...prev, endTime: Date.now() };
     });
+    setSynthesizing(true); // 进入合成流程，ReportView 显示 loading
     // 立即显示报告，不延迟
     setShowReport(true);
   }, []);
@@ -594,9 +599,11 @@ export default function App() {
             data={session}
             recordedVideo={recordedVideoBlob}
             recordedRawBlob={recordedRawBlob}
+            synthesizing={synthesizing}
             onReset={() => {
               setShowReport(false);
               setRecordedVideoBlob(null);
+              setSynthesizing(false);
             }}
           />
         )}
