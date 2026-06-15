@@ -624,16 +624,30 @@ ${timestamps}
           throw new Error(err.error || `提交失败 HTTP ${res.status}`);
         }
 
-        // 读取流
+        // 读取流 (SSE 流式解析)
         setStatusText('AI 教练正在实时看片...');
-        const json = await res.json();
-        const rawJson = json.content || '';
+        const rawContent = await readStream(res, (progress) => {});
 
-        if (!rawJson) {
-          throw new Error(json.error || 'AI 未返回有效内容');
+        if (!rawContent) {
+          throw new Error('AI 未返回有效内容');
         }
 
-        // 流结束，解析完整 JSON
+        // 从 SSE 中提取最终 JSON (__complete 事件)
+        let finalJson = '';
+        const sseLines = rawContent.split('\n');
+        for (const line of sseLines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const parsed = JSON.parse(line.slice(6));
+              if (parsed.__complete && parsed.content) {
+                finalJson = parsed.content;
+              }
+            } catch {}
+          }
+        }
+        if (!finalJson) finalJson = rawContent;
+
+        // 流结束，解析完整 JSON        // 流结束，解析完整 JSON
         if (streamTimerRef.current) { clearInterval(streamTimerRef.current); streamTimerRef.current = null; }
         streamAbortRef.current = null;
 
