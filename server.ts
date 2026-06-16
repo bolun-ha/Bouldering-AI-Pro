@@ -548,6 +548,8 @@ app.post("/api/analyze-stream", async (req, res) => {
     const decoder = new TextDecoder();
     let fullContent = '';
     let parsed = false;
+    let sectionBuffer = '';
+    let currentSection = '';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -566,11 +568,32 @@ app.post("/api/analyze-stream", async (req, res) => {
           if (delta) {
             fullContent += delta;
             parsed = true;
-            // 实时转发给前端：每段文字增量
+
+            // 检测段落边界 ###SECTION:{name}
+            const sectionMatch = delta.match(/###SECTION:(\w+)/);
+            if (sectionMatch) {
+              // 如果有上一个段落未推送，先推送
+              if (currentSection && sectionBuffer.trim()) {
+                res.write(`data: ${JSON.stringify({ __section: true, name: currentSection, content: sectionBuffer.trim() })}\n\n`);
+              }
+              currentSection = sectionMatch[1];
+              sectionBuffer = '';
+              continue;
+            }
+
+            // 累积到当前段落
+            sectionBuffer += delta;
+
+            // 实时转发原始字符给前端（逐字打字效果）
             res.write(`data: ${JSON.stringify({ __delta: true, text: delta })}\n\n`);
           }
         } catch { /* 跳过无法解析的行 */ }
       }
+    }
+
+    // 推送最后一个段落
+    if (currentSection && sectionBuffer.trim()) {
+      res.write(`data: ${JSON.stringify({ __section: true, name: currentSection, content: sectionBuffer.trim() })}\n\n`);
     }
 
     console.log(`[analyze-stream] 流式完成, 收到 ${fullContent.length} 字符, 已解析=${parsed}`);

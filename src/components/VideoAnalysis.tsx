@@ -74,6 +74,7 @@ export function VideoAnalysis() {
 
   // ── 分析结果 ──
   const [result, setResult] = useState<VideoAnalysisResult | null>(null);
+  const [liveSections, setLiveSections] = useState<Record<string, string>>({}); // 流式分块实时数据
   const [issues, setIssues] = useState<TimestampedIssue[]>([]);
   const [activeIssue, setActiveIssue] = useState<number | null>(null);
   const [keyframes, setKeyframes] = useState<Record<number, string>>({});
@@ -125,6 +126,7 @@ export function VideoAnalysis() {
   const readStream = useCallback(async (
     response: Response,
     onProgress: (raw: string) => void,
+    onSection?: (name: string, content: string) => void,
   ): Promise<string> => {
     const reader = response.body?.getReader();
     if (!reader) throw new Error('响应流不可读');
@@ -148,6 +150,11 @@ export function VideoAnalysis() {
           if (dataStr === '[DONE]') continue;
           try {
             const parsed = JSON.parse(dataStr);
+            // 识别分块段落事件
+            if (parsed.__section && parsed.name && parsed.content && onSection) {
+              onSection(parsed.name, parsed.content);
+              continue;
+            }
             if (parsed.error) throw new Error(parsed.error);
             const content = parsed.choices?.[0]?.delta?.content || '';
             buffer += content;
@@ -311,6 +318,7 @@ export function VideoAnalysis() {
     setVideoUrl(URL.createObjectURL(file));
     setPhase('idle');
     setResult(null);
+    setLiveSections({});
     setIssues([]);
     setActiveIssue(null);
     setErrorText(null);
@@ -562,8 +570,24 @@ ${timestamps}
 - 判断终局结果 climb_result
 - 只返回 JSON，不要其他文字
 - 🚫 JSON 字符串值内严禁使用未经转义的英文双引号，若需引用口语请改用中文引号或单引号
+- 请按以下固定顺序依次输出，每个部分前加 ###SECTION:标记：
 
-### 输出 JSON 格式
+###SECTION:RESULT
+{climb_result, end_game_reason, top_control_score, top_hand_match_status}
+
+###SECTION:SCORE
+{overall_score, summary, sequence_analysis}
+
+###SECTION:PHASES
+{phases 数组}
+
+###SECTION:ISSUES
+{issues 数组}
+
+###SECTION:REVIEW
+{strengths, weaknesses, improvements}
+
+### 输出 JSON 格式（最终完整输出）
 {
   "climb_result": "SUCCESS | FAIL | UNKNOWN",
   "end_game_reason": "裁判依据（详细描述合分/坠落过程及时间点）",
@@ -626,15 +650,20 @@ ${timestamps}
 
         // 读取流 (SSE 流式解析)
         setStatusText('AI 教练正在实时看片...');
-        const rawContent = await readStream(res, (progress) => {});
+        const rawContent = await readStream(res, (progress) => {
+          // 实时进度更新
+        }, (sectionName, sectionContent) => {
+          // 收到分块段落，实时更新 liveSections
+          setLiveSections(prev => ({ ...prev, [sectionName]: sectionContent }));
+        });
 
         if (!rawContent) {
           throw new Error('AI 未返回有效内容');
         }
 
-        // 从 SSE 中提取最终 JSON (__complete 事件)
-        let finalJson = '';
+        // 从 SSE 中解析所有事件：分块事件 + 完整 JSON
         const sseLines = rawContent.split('\n');
+        let finalJson = '';
         for (const line of sseLines) {
           if (line.startsWith('data: ')) {
             try {
@@ -647,12 +676,12 @@ ${timestamps}
         }
         if (!finalJson) finalJson = rawContent;
 
-        // 流结束，解析完整 JSON        // 流结束，解析完整 JSON
+        // 流结束，解析完整 JSON
         if (streamTimerRef.current) { clearInterval(streamTimerRef.current); streamTimerRef.current = null; }
         streamAbortRef.current = null;
 
         // 清理可能的 markdown 包裹
-        const cleaned = rawJson.replace(/^```(?:json)?\s*/, '').replace(/\s*```\s*$/, '').trim();
+        const cleaned = finalJson.replace(/^```(?:json)?\s*/, '').replace(/\s*```\s*$/, '').trim();
         try {
           analysisResult = JSON.parse(cleaned);
         } catch (_) {
@@ -823,6 +852,7 @@ ${timestamps}
     setVideoUrl(null);
     setPhase('idle');
     setResult(null);
+    setLiveSections({});
     setIssues([]);
     setActiveIssue(null);
     setErrorText(null);
@@ -978,6 +1008,25 @@ ${timestamps}
       )}
 
       {/* ═══════════ 结果展示 ───────────────────── */}
+      {/* ─── 实时分块预览（分析中） ──── */}
+      {phase === 'analyzing' && Object.keys(liveSections).length > 0 && (
+        <div className="w-full max-w-md px-4 mt-3 mb-8 space-y-3">
+          <div className="bg-slate-900/80 backdrop-blur-xl rounded-2xl p-4 border border-slate-700/50">
+            <h3 className="text-xs font-bold text-orange-400 flex items-center gap-2 mb-3">
+              <Radio className="w-3 h-3 animate-pulse" /> AI 教练实时分析
+            </h3>
+            <div className="space-y-2">
+              {Object.entries(liveSections).map(([name, content]) => (
+                <div key={name} className="bg-slate-800/60 rounded-xl p-3 border border-slate-700/30">
+                  <span className="text-[10px] font-bold uppercase text-orange-500/70 block mb-1">{name}</span>
+                  <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{content}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {phase === 'done' && result && (
         <div className="w-full max-w-md px-4 mt-3 mb-8 space-y-3">
 
