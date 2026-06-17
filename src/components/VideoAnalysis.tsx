@@ -678,7 +678,7 @@ ${timestamps}
         streamAbortRef.current = null;
 
         // 清理可能的 markdown 包裹
-        const cleaned = rawJson.replace(/^```(?:json)?\s*/, '').replace(/\s*```\s*$/, '').trim();
+        const cleaned = finalJson.replace(/^```(?:json)?\s*/, '').replace(/\s*```\s*$/, '').trim();
         try {
           analysisResult = JSON.parse(cleaned);
         } catch (_) {
