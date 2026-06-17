@@ -30,6 +30,10 @@ var import_dotenv = __toESM(require("dotenv"), 1);
 var import_crypto = __toESM(require("crypto"), 1);
 var import_jsonrepair = require("jsonrepair");
 import_dotenv.default.config();
+var scriptDir = import_path.default.dirname(process.argv[1] || "");
+if (import_fs.default.existsSync("/var/www/Bouldering-AI-Pro/dist/index.html")) {
+  scriptDir = "/var/www/Bouldering-AI-Pro/dist";
+}
 var app = (0, import_express.default)();
 var PORT = 3003;
 app.use(import_express.default.json({ limit: "10mb" }));
@@ -449,15 +453,15 @@ ${armLines}
       stream: true
     };
     let zhipuRes = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 5; attempt++) {
       zhipuRes = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
         method: "POST",
         headers: zhipuHeaders(),
         body: JSON.stringify(body)
       });
       if (zhipuRes.ok || zhipuRes.status !== 429) break;
-      const waitMs = Math.min(2e3 * Math.pow(2, attempt - 1), 8e3);
-      console.warn(`[analyze-stream] \u667A\u8C31 429 \u9650\u6D41 (attempt ${attempt}/3), \u7B49\u5F85 ${waitMs}ms`);
+      const waitMs = Math.min(3e3 * Math.pow(2, attempt - 1), 4e4);
+      console.warn(`[analyze-stream] \u667A\u8C31 429 \u9650\u6D41 (attempt ${attempt}/5), \u7B49\u5F85 ${waitMs}ms`);
       await new Promise((r) => setTimeout(r, waitMs));
     }
     if (!zhipuRes || !zhipuRes.ok) {
@@ -466,6 +470,12 @@ ${armLines}
       console.error(`[analyze-stream] Zhipu API ${errStatus}: ${errText.slice(0, 200)}`);
       return res.status(502).json({ error: `\u667A\u8C31 API ${errStatus}` });
     }
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no"
+    });
     const reader = zhipuRes.body?.getReader();
     if (!reader) {
       return res.status(502).json({ error: "\u65E0\u6CD5\u8BFB\u53D6\u54CD\u5E94\u6D41" });
@@ -488,8 +498,13 @@ ${armLines}
         try {
           const event = JSON.parse(dataStr);
           const delta = event.choices?.[0]?.delta?.content;
-          if (delta) fullContent += delta;
-          if (delta) parsed = true;
+          if (delta) {
+            fullContent += delta;
+            parsed = true;
+            res.write(`data: ${JSON.stringify({ __delta: true, text: delta })}
+
+`);
+          }
         } catch {
         }
       }
@@ -502,14 +517,26 @@ ${armLines}
     if (firstBrace >= 0 && lastBrace > firstBrace) {
       finalContent = finalContent.slice(firstBrace, lastBrace + 1);
     }
-    res.json({ content: finalContent, parsed });
+    res.write(`data: ${JSON.stringify({ __complete: true, content: finalContent, parsed })}
+
+`);
+    res.write("data: [DONE]\n\n");
+    res.end();
   } catch (error) {
     console.error("[analyze-stream] error:", error.message);
-    res.status(500).json({ error: error.message });
+    try {
+      res.write(`data: ${JSON.stringify({ error: error.message })}
+
+`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+    } catch {
+      res.status(500).json({ error: error.message });
+    }
   }
 });
 async function startServer() {
-  const isProduction = process.env.NODE_ENV === "production" || import_fs.default.existsSync(import_path.default.join(__dirname, "index.html"));
+  const isProduction = import_fs.default.existsSync(import_path.default.join(scriptDir, "index.html"));
   if (!isProduction) {
     const vite = await (0, import_vite.createServer)({
       server: { middlewareMode: true },
@@ -517,10 +544,9 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = __dirname;
-    app.use(import_express.default.static(distPath));
+    app.use(import_express.default.static(scriptDir));
     app.get("*", (req, res) => {
-      res.sendFile(import_path.default.join(distPath, "index.html"));
+      res.sendFile(import_path.default.join(scriptDir, "index.html"));
     });
   }
   app.listen(PORT, "0.0.0.0", () => {

@@ -6,8 +6,9 @@ import { GuidancePanel } from './components/GuidancePanel';
 import { ReportView } from './components/ReportView';
 import { VideoRecorder } from './components/VideoRecorder';
 import { VideoAnalysis } from './components/VideoAnalysis';
+import { RouteGuideUploader } from './components/RouteGuide';
 import { AnalysisResult, SessionData, HistoryEntry } from './types';
-import { Play, Square, ShieldCheck, Settings, History, Video, Camera } from 'lucide-react';
+import { Play, Square, ShieldCheck, Settings, History, Video, Camera, ChevronRight } from 'lucide-react';
 import { drawMarkers } from './utils/drawMarkers';
 import { QRPopover } from './components/QRPopover';
 
@@ -22,6 +23,7 @@ export default function App() {
   const [recordedVideoBlob, setRecordedVideoBlob] = useState<Blob | null>(null);
   const [recordedRawBlob, setRecordedRawBlob] = useState<Blob | null>(null);
   const [mode, setMode] = useState<'camera' | 'video'>('camera');
+  const [videoSubMode, setVideoSubMode] = useState<'route' | 'analysis'>('route');
   const [showQR, setShowQR] = useState(false);
   const cooldownRef = useRef(false);
 
@@ -326,7 +328,37 @@ export default function App() {
             )}
           </>
         ) : (
-          <VideoAnalysis />
+          <div className="w-full h-full flex flex-col">
+            {/* Video Submode Tabs */}
+            <div className="flex bg-slate-900 border-b border-slate-800">
+              <button
+                onClick={() => setVideoSubMode('route')}
+                className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
+                  videoSubMode === 'route'
+                    ? 'text-orange-400 border-b-2 border-orange-500'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                📷 图片路线分析
+              </button>
+              <button
+                onClick={() => setVideoSubMode('analysis')}
+                className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
+                  videoSubMode === 'analysis'
+                    ? 'text-orange-400 border-b-2 border-orange-500'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                🎬 视频分析
+              </button>
+            </div>
+            {/* Content */}
+            {videoSubMode === 'route' ? (
+              <RouteGuideUploader />
+            ) : (
+              <VideoAnalysis />
+            )}
+          </div>
         )}
       </main>
 
