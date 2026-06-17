@@ -177,7 +177,13 @@ export function VideoAnalysis() {
     s = s.replace(/'/g, '"');
     // 4. 未引号属性名补引号
     s = s.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-    // 5. jsonrepair 自动修复合（兜不住时 return 原始串）
+    // 5. 补所有未引号的键名（兜底）
+    s = s.replace(/(\w+):/g, '"$1":');
+    // 6. 值里漏引号的情况
+    s = s.replace(/:\s*'([^']*)'/g, ':"$1"');
+    // 7. 去除字符串拼接
+    s = s.replace(/"\s*\+\s*"/g, '');
+    // 8. jsonrepair 自动修复（兜不住时 return 原始串）
     try {
       return jsonrepair(s);
     } catch {

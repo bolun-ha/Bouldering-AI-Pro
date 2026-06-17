@@ -152,25 +152,45 @@ async function zhipuChat(
 function extractJSON(text: string): any {
   // 去掉可能的 markdown 包裹
   let s = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
-  try {
-    return JSON.parse(s);
-  } catch {
-    // 尝试 jsonrepair
-    try {
-      return JSON.parse(jsonrepair(s));
-    } catch {
-      // 正则兜底：取第一个 {} 块
-      const match = s.match(/\{[\s\S]*\}/);
-      if (match) {
-        try {
-          return JSON.parse(jsonrepair(match[0]));
-        } catch {
-          return JSON.parse(match[0]);
-        }
-      }
-      throw new Error("Could not parse AI response as JSON");
-    }
-  }
+
+  // 多重修复策略
+  const repair1 = (str: string) => {
+    // 基础 jsonrepair
+    try { return JSON.parse(jsonrepair(str)); } catch { return undefined; }
+  };
+  const repair2 = (str: string) => {
+    // 先做预处理再 jsonrepair
+    let t = str
+      .replace(/'/g, '"')                 // 单引号→双引号
+      .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":') // 补属性名引号
+      .replace(/,\s*}/g, '}')             // 删除尾随逗号
+      .replace(/,\s*\]/g, ']');
+    try { return JSON.parse(jsonrepair(t)); } catch { return undefined; }
+  };
+  const repair3 = (str: string) => {
+    // 提取首尾大括号，极端修复
+    const m = str.match(/\{[\s\S]*\}/);
+    if (!m) return undefined;
+    let t = m[0]
+      .replace(/'/g, '"')
+      .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":')
+      .replace(/,\s*}/g, '}')
+      .replace(/,\s*\]/g, ']')
+      .replace(/(\w+):/g, '"$1":')        // 补所有未引号的键名
+      .replace(/:\s*'([^']*)'/g, ':"$1"') // 值里漏引号的情况
+      .replace(/"\s*\+\s*"/g, '')         // 去除字符串拼接
+      .replace(/\s+/g, ' ')               // 合并空白
+      .replace(/,\s*$/, '');              // 去掉末尾逗号
+    try { return JSON.parse(jsonrepair(t)); } catch { return undefined; }
+  };
+
+  // 按优先级顺序尝试
+  let result = repair1(s);
+  if (!result) result = repair2(s);
+  if (!result) result = repair3(s);
+  if (!result) throw new Error("Could not parse AI response as JSON");
+
+  return result;
 }
 
 // ─── POST /api/analyze — Frame analysis (vision) ────────────────
@@ -211,7 +231,19 @@ app.post("/api/analyze", async (req, res) => {
 
     const result = extractJSON(text);
     console.log("AI Analysis Result:", JSON.stringify(result, null, 2));
-    res.json(result);
+
+    // 字段补全：AI 可能只返回部分字段
+    const safeResult = {
+      markers: Array.isArray(result.markers) ? result.markers : [],
+      instruction: result.instruction || '保持当前攀爬姿势。',
+      detailed_feedback: result.detailed_feedback || '暂无详细反馈。',
+      detected_route_color: result.detected_route_color || '',
+      climb_status: ['moving', 'steady', 'stuck', 'falling', 'finished'].includes(result.climb_status) ? result.climb_status : 'steady',
+      hold_positions: Array.isArray(result.hold_positions) ? result.hold_positions : [],
+      climb_result: ['SUCCESS', 'FAIL', 'UNKNOWN'].includes(result.climb_result) ? result.climb_result : 'UNKNOWN',
+    };
+
+    res.json(safeResult);
   } catch (error: any) {
     console.error("AI Analysis Error:", error);
     res.status(500).json({ error: error.message });
@@ -295,7 +327,18 @@ ${framesSummary || "无数据"}
 
     const result = extractJSON(text);
     console.log("Report Result:", JSON.stringify(result, null, 2));
-    res.json(result);
+
+    // 字段补全：AI 可能只返回部分字段，确保前端不会崩
+    const safeResult = {
+      overallScore: typeof result.overallScore === 'number' ? result.overallScore : 75,
+      summary: result.summary || '本期训练整体表现良好，继续保持。',
+      strengths: Array.isArray(result.strengths) ? result.strengths : ['整体姿态标准', '动作流畅度良好'],
+      weaknesses: Array.isArray(result.weaknesses) ? result.weaknesses : ['建议保持专注'],
+      improvements: Array.isArray(result.improvements) ? result.improvements : ['继续练习，保持良好的攀爬习惯'],
+      trend: result.trend || '持续稳步进步中',
+    };
+
+    res.json(safeResult);
   } catch (error: any) {
     console.error("Report Generation Error:", error);
     res.status(500).json({ error: error.message });

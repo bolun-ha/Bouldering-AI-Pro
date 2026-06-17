@@ -24,6 +24,7 @@ export default function App() {
   const [recordedRawBlob, setRecordedRawBlob] = useState<Blob | null>(null);
   const [mode, setMode] = useState<'camera' | 'video'>('camera');
   const [videoSubMode, setVideoSubMode] = useState<'route' | 'analysis'>('route');
+  const [cameraOn, setCameraOn] = useState(false);
   const [showQR, setShowQR] = useState(false);
   const cooldownRef = useRef(false);
 
@@ -47,6 +48,21 @@ export default function App() {
   }, []);
 
   const startClimb = () => {
+    if (!cameraOn) {
+      setCameraOn(true);
+      // 摄像头打开后再开始录制，给 MediaPipe 一点初始化时间
+      setTimeout(() => {
+        setRecordedVideoBlob(null);
+        setSession({
+          startTime: Date.now(),
+          totalErrors: 0,
+          history: []
+        });
+        setIsRecording(true);
+        setCurrentResult(null);
+      }, 1500);
+      return;
+    }
     setRecordedVideoBlob(null);
     setSession({
       startTime: Date.now(),
@@ -221,43 +237,38 @@ export default function App() {
     <>
       <QRPopover isOpen={showQR} onClose={() => setShowQR(false)} xiaohongshuQR="/xiaohongshu-qr.png" />
       <div className="relative h-screen w-screen bg-slate-950 font-sans text-slate-200 overflow-hidden flex flex-col">
-      {/* Mobile-First Header */}
-      <header className="absolute top-0 inset-x-0 h-16 bg-gradient-to-b from-slate-950/80 to-transparent flex items-center justify-between px-6 z-40 backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <button id="b-logo" onClick={() => setShowQR(true)} className="w-8 h-8 bg-orange-600 rounded-lg flex items-center justify-center text-white font-black italic shadow-lg shadow-orange-600/20 hover:bg-orange-500 active:scale-90 transition-all">B</button>
-          <h1 className="text-sm font-black tracking-tighter text-white uppercase italic">抱石 AI <span className="text-orange-500">专业版</span></h1>
+      {/* Mobile-First Header — 精简一行 */}
+      <header className="absolute top-0 inset-x-0 h-14 bg-gradient-to-b from-slate-950/80 to-transparent flex items-center justify-between px-4 z-40 backdrop-blur-sm">
+        <div className="flex items-center gap-2">
+          <button id="b-logo" onClick={() => setShowQR(true)} className="w-7 h-7 bg-orange-600 rounded-lg flex items-center justify-center text-white font-black italic shadow-lg shadow-orange-600/20 hover:bg-orange-500 active:scale-90 transition-all text-[10px]">B</button>
+          <h1 className="text-[11px] font-black tracking-tighter text-white uppercase italic whitespace-nowrap">抱石 AI<span className="text-orange-500 ml-1">专业版</span></h1>
         </div>
 
-        <div className="flex items-center gap-4">
-          {/* Mode Toggle */}
-          <div className="flex bg-slate-900 rounded-xl p-0.5 border border-slate-800">
+        <div className="flex items-center gap-2">
+          {/* Mode Toggle — 更紧凑 */}
+          <div className="flex bg-slate-900 rounded-lg p-0.5 border border-slate-800">
             <button
               onClick={() => setMode('camera')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[9px] font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
                 mode === 'camera'
                   ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/20'
                   : 'text-slate-500 hover:text-slate-300'
               }`}
             >
-              <Camera className="w-3 h-3" /> 实时
+              <Camera className="w-2.5 h-2.5" /> 实时
             </button>
             <button
               onClick={() => setMode('video')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[9px] font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
                 mode === 'video'
                   ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/20'
                   : 'text-slate-500 hover:text-slate-300'
               }`}
             >
-              <Video className="w-3 h-3" /> 视频
+              <Video className="w-2.5 h-2.5" /> 视频
             </button>
           </div>
-          <div className="flex flex-col items-end">
-            <span className="text-[8px] text-slate-500 uppercase font-black">云端延迟</span>
-            <span className="text-[10px] font-mono text-emerald-400">1.2s</span>
-          </div>
-          <div className="h-4 w-px bg-slate-800"></div>
-          <div className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-500'}`} />
+          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-600'}`} />
         </div>
       </header>
 
@@ -265,26 +276,50 @@ export default function App() {
       <main className="flex-1 relative overflow-hidden bg-slate-900 shadow-inner">
         {mode === 'camera' ? (
           <>
-            <CameraStream
-              onFrame={handleFrame}
-              onPoseMarkers={handlePoseMarkers}
-              isRecording={isRecording}
-              captureInterval={1800}
-              onError={setCameraError}
-              onVideoReady={handleVideoReady}
-            />
+            {/* Camera off: show placeholder with start button */}
+            {!cameraOn ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900">
+                <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mb-6">
+                  <Camera className="w-10 h-10 text-slate-500" />
+                </div>
+                <h2 className="text-lg font-black text-white uppercase italic mb-2">准备攀爬</h2>
+                <p className="text-sm text-slate-400 mb-8 text-center px-8">
+                  开启摄像头后即可进行实时姿态检测<br />与 AI 攀爬分析
+                </p>
+                <button
+                  onClick={() => {
+                    setCameraOn(true);
+                  }}
+                  className="bg-orange-600 hover:bg-orange-500 text-white px-8 py-4 rounded-2xl font-bold text-base active:scale-95 transition-all shadow-2xl shadow-orange-600/20 flex items-center gap-3"
+                >
+                  <Camera className="w-5 h-5" />
+                  开启摄像头
+                </button>
+              </div>
+            ) : (
+              <>
+                <CameraStream
+                  onFrame={handleFrame}
+                  onPoseMarkers={handlePoseMarkers}
+                  isRecording={isRecording}
+                  captureInterval={1800}
+                  onError={setCameraError}
+                  onVideoReady={handleVideoReady}
+                />
 
-            {/* VideoRecorder（隐藏的合成录制引擎） */}
-            <VideoRecorder
-              video={videoElementRef.current}
-              markers={currentResult?.markers || []}
-              active={isRecording}
-              onRecordingComplete={handleRecordingComplete}
-              fps={15}
-            />
+                {/* VideoRecorder（隐藏的合成录制引擎） */}
+                <VideoRecorder
+                  video={videoElementRef.current}
+                  markers={currentResult?.markers || []}
+                  active={isRecording}
+                  onRecordingComplete={handleRecordingComplete}
+                  fps={15}
+                />
+              </>
+            )}
 
             {/* Camera Error Message */}
-            {cameraError && (
+            {cameraError && cameraOn && (
               <div className="absolute inset-0 z-50 flex items-center justify-center p-8 text-center bg-slate-950/90 backdrop-blur-md">
                 <div className="max-w-xs space-y-4">
                   <div className="w-16 h-16 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -363,7 +398,7 @@ export default function App() {
       </main>
 
       {/* Camera Mode: Floating Controls Overlay — 纯条件渲染，去动画避免冲突 */}
-      {mode === 'camera' && !isRecording && !showReport && (
+      {mode === 'camera' && cameraOn && !isRecording && !showReport && (
         <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-4 w-full px-8 max-w-sm">
             <button
               onClick={startClimb}
@@ -413,18 +448,17 @@ export default function App() {
         </div>
       )}
 
-      {/* Bottom Meter Rail */}
-      <footer className="h-4 bg-slate-950 flex items-center justify-between px-6 z-40 border-t border-slate-900/50">
+      {/* Bottom Meter Rail — 精简 */}
+      <footer className="h-3 bg-slate-950 flex items-center justify-between px-4 z-40 border-t border-slate-900/50">
           {mode === 'camera' && (
-            <div className="flex gap-4 text-[6px] font-mono text-slate-600 uppercase tracking-[0.2em]">
-              <span>端到端加密已启用</span>
-              <span>网络带宽: 420MB/s</span>
+            <div className="flex gap-3 text-[5px] font-mono text-slate-700 uppercase tracking-[0.15em] truncate">
+              <span>加密</span>
               {currentResult?.detected_route_color && (
-                <span className="text-orange-500 font-bold">检测线路: {currentResult.detected_route_color}</span>
+                <span className="text-orange-600 font-bold truncate">{currentResult.detected_route_color}</span>
               )}
             </div>
           )}
-        <ShieldCheck className="w-3 h-3 text-emerald-950" />
+        <ShieldCheck className="w-2 h-2 text-emerald-950 flex-shrink-0" />
       </footer>
 
       {/* Full-Screen Report Overlay */}
