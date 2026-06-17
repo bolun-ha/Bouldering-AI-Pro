@@ -250,6 +250,42 @@ app.post("/api/analyze", async (req, res) => {
   }
 });
 
+// ─── POST /api/route-guide — 图片上传路线分析 ──────────────
+app.post("/api/route-guide", async (req, res) => {
+  try {
+    const { frames, prompt, model = "glm-5v-turbo" } = req.body;
+    if (!frames || !frames.length || !prompt) {
+      return res.status(400).json({ error: "缺少 frames 或 prompt" });
+    }
+
+    const contentArray: any[] = [{ type: "text", text: prompt }];
+    for (const frame of frames) {
+      const imgData = frame.dataUrl || frame.base64;
+      const imgUrl = imgData.startsWith("data:")
+        ? imgData
+        : `data:image/jpeg;base64,${imgData}`;
+      contentArray.push({
+        type: "image_url",
+        image_url: { url: imgUrl },
+      });
+    }
+
+    const text = await zhipuChat(model, [
+      { role: "user", content: contentArray }
+    ]);
+
+    const result = extractJSON(text);
+    if (!result.steps) result.steps = [];
+    if (!result.tips) result.tips = [];
+
+    console.log("Route Guide Result:", JSON.stringify(result, null, 2));
+    res.json(result);
+  } catch (error: any) {
+    console.error("Route Guide Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ─── POST /api/report — AI-powered session report ────────────────
 const REPORT_SYSTEM_PROMPT = `你是一位专业的抱石教练。基于用户的攀爬训练数据，生成一份专业的训练评估报告。
 

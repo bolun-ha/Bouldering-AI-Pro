@@ -58,7 +58,7 @@ const ANALYZING_MESSAGES = [
   '教练正在圈出需要改进的地方...',
 ];
 
-export function VideoAnalysis() {
+export function VideoAnalysis({ onOpenRouteGuide }: { onOpenRouteGuide?: () => void }) {
   // ── 文件 & 播放 ──
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -67,7 +67,8 @@ export function VideoAnalysis() {
   const [currentTime, setCurrentTime] = useState(0);         // 实时播放进度
 
   // ── 分析流程 ──
-  const [phase, setPhase] = useState<'idle' | 'extracting' | 'submitting' | 'analyzing' | 'done' | 'error'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'selecting' | 'extracting' | 'submitting' | 'analyzing' | 'done' | 'error'>('idle');
+  const [analysisMode, setAnalysisMode] = useState<'quick' | 'full'>('quick');
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -88,6 +89,9 @@ export function VideoAnalysis() {
   const bboxOverlayRef = useRef<HTMLCanvasElement>(null);
   const framesRef = useRef<ExtractedFrame[]>([]);
   const msgRef = useRef<number | null>(null);
+
+  // ── 实时 AI 打字机日志 ──
+  const [liveLog, setLiveLog] = useState('');
 
   // 清理（仅 URL 和消息轮换）
   useEffect(() => {
@@ -148,6 +152,13 @@ export function VideoAnalysis() {
           if (dataStr === '[DONE]') continue;
           try {
             const parsed = JSON.parse(dataStr);
+
+            // __delta 事件：服务端实时转发的文本增量（打字机效果）
+            if (parsed.__delta && parsed.text) {
+              setLiveLog(prev => prev + parsed.text);
+              continue;
+            }
+
             if (parsed.error) throw new Error(parsed.error);
             const content = parsed.choices?.[0]?.delta?.content || '';
             buffer += content;
@@ -338,11 +349,19 @@ export function VideoAnalysis() {
     if (video) setCurrentTime(video.currentTime);
   }, []);
 
+  // ── 选择分析模式 ──
+  const handleSelectMode = useCallback((mode: 'quick' | 'full') => {
+    setAnalysisMode(mode);
+    setPhase('selecting');
+  }, []);
+
   // ── 开始抽帧 → 流式分析 ──
-  const startAnalysis = useCallback(async () => {
+  const startAnalysis = useCallback(async (frameCount?: number) => {
     const video = videoRef.current;
     const canvas = extractCanvasRef.current;
     if (!video || !canvas) return;
+
+    const useCount = frameCount ?? DEFAULT_FRAME_COUNT;
 
     // 确保视频元数据已加载
     if (video.readyState < 1) {
@@ -376,7 +395,7 @@ export function VideoAnalysis() {
     setProgress(5);
 
     // 1. 计算抽帧间隔
-    const interval = duration / DEFAULT_FRAME_COUNT;
+    const interval = duration / useCount;
     const extracted: ExtractedFrame[] = [];
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
@@ -399,7 +418,7 @@ export function VideoAnalysis() {
     const armSupplement: ArmSupplement[] = [];
     const SEEK_TIMEOUT = 4000; // 移动端 Safari 兼容：4 秒超时
     let lastMediaPipeTimestamp = -1; // 📌 强制 MediaPipe 时间戳单调递增
-    for (let i = 0; i < DEFAULT_FRAME_COUNT; i++) {
+    for (let i = 0; i < useCount; i++) {
       const targetTime = i * interval;
       video.currentTime = targetTime;
 
@@ -511,7 +530,7 @@ export function VideoAnalysis() {
               }
             }
 
-            setProgress(5 + Math.round((i + 1) / DEFAULT_FRAME_COUNT * 40));
+            setProgress(5 + Math.round((i + 1) / useCount * 40));
             resolve();
           });
         }
@@ -524,6 +543,7 @@ export function VideoAnalysis() {
     setPhase('submitting');
     setProgress(46);
     setStatusText('正在提交给 AI 分析...');
+    setLiveLog(''); // 清空打字机日志
 
     const timestamps = extracted.map((f, i) => {
       const ts = f.timestamp ?? i * interval;
@@ -531,7 +551,7 @@ export function VideoAnalysis() {
     }).join('\n');
 
     const prompt = `# Role
-你是一名国家级专业抱石攀岩教练兼比赛主裁判。请分析输入的${DEFAULT_FRAME_COUNT}张按时间排序的攀岩截图，并结合我为你提供的前端骨骼检测元数据（MediaPipe 实测肘关节角度），进行深度、连贯的复盘。
+你是一名国家级专业抱石攀岩教练兼比赛主裁判。请分析输入的${useCount}张按时间排序的攀岩截图，并结合我为你提供的前端骨骼检测元数据（MediaPipe 实测肘关节角度），进行深度、连贯的复盘。
 
 # 截图时间序
 ${timestamps}
@@ -557,8 +577,8 @@ ${timestamps}
 - 可能情况：主动下墙、画面盲区合分、合分瞬间跳落等
 
 ### 顶端动作控制 KPI
-- 审视终点**手部锁定**与**重心移动**：果断动态冲顶（Dyno to Top）后高质量合分？还是终点犹豫倒手耗尽体力？
-- 骨骼数据显示合分时手臂是否已死锁（肘角 < 90° 代偿）？
+- 观察终点**手部锁定**与**重心移动**：是如何完成合分的（动态冲顶 / 稳定合手 / 倒手调整等）
+- 骨骼数据显示合分时手臂状态（肘角角度）
 - 合分精准度评分 top_control_score（0-100）及合分状态 top_hand_match_status
 
 ### 输出要求
@@ -884,6 +904,12 @@ ${timestamps}
           <p className="text-sm text-slate-400 text-center">
             AI 教练将完整分析你的攀爬动作，找出需要改进的关键时刻
           </p>
+          <button
+            onClick={onOpenRouteGuide}
+            className="text-[10px] text-slate-600 hover:text-slate-400 transition-colors underline underline-offset-2"
+          >
+            需要路线分析？试试图片上传 →
+          </button>
           <label className="w-full cursor-pointer group">
             <div className="border-2 border-dashed border-slate-700 hover:border-orange-500/50 rounded-2xl p-10 text-center transition-all">
               <Upload className="mx-auto mb-4 text-slate-500 group-hover:text-orange-400" size={40} />
@@ -949,13 +975,45 @@ ${timestamps}
               重新选择
             </button>
             <button
-              onClick={startAnalysis}
+              onClick={() => setPhase('selecting')}
               className="flex-[2] bg-green-600 hover:bg-green-500 text-white h-14 rounded-2xl flex items-center justify-center gap-2 font-bold text-lg transition-all active:scale-95"
             >
               <Play className="w-5 h-5 fill-current" /> 开始 AI 分析
             </button>
           </div>
         </motion.div>
+      )}
+
+      {/* ═══════════ 分析模式选择弹窗 ──────────── */}
+      {phase === 'selecting' && (
+        <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 rounded-3xl border border-slate-800 p-6 max-w-sm w-full">
+            <h3 className="text-lg font-black text-white text-center mb-2">选择分析模式</h3>
+            <p className="text-xs text-slate-500 text-center mb-5">根据你的时间需求选择合适的分析深度</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setPhase('extracting'); startAnalysis(Math.ceil(10 / 2)); }}
+                className="flex-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-2xl p-4 text-center transition-all active:scale-[0.97]"
+              >
+                <div className="text-base font-bold text-white mb-1">⚡ 快速分析</div>
+                <div className="text-[11px] text-slate-500">约 1-2 分钟</div>
+              </button>
+              <button
+                onClick={() => { setPhase('extracting'); startAnalysis(10); }}
+                className="flex-1 bg-orange-600/20 hover:bg-orange-600/30 border border-orange-600/40 rounded-2xl p-4 text-center transition-all active:scale-[0.97]"
+              >
+                <div className="text-base font-bold text-orange-400 mb-1">🔬 全面分析</div>
+                <div className="text-[11px] text-slate-500">约 3-5 分钟</div>
+              </button>
+            </div>
+            <button
+              onClick={() => setPhase('idle')}
+              className="w-full mt-4 text-xs text-slate-600 hover:text-slate-400 transition-colors underline underline-offset-2"
+            >
+              取消
+            </button>
+          </div>
+        </div>
       )}
 
       {/* ═══════════ 进度条 ───────────────────── */}
@@ -979,6 +1037,22 @@ ${timestamps}
               </div>
               <span className="text-xs text-slate-600">{progress}%</span>
             </div>
+
+            {/* AI 实时打字机日志 */}
+            {phase === 'analyzing' && liveLog && (
+              <div className="mt-3 bg-zinc-900/90 backdrop-blur rounded-xl p-3 border border-yellow-500/20">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="flex h-2 w-2 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-yellow-500" />
+                  </span>
+                  <span className="text-[10px] text-yellow-500 font-bold uppercase tracking-widest">教练实时复盘</span>
+                </div>
+                <p className="text-xs text-zinc-300 leading-relaxed line-clamp-4 font-mono">
+                  {liveLog || '正在建立长连接管道...'}
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}

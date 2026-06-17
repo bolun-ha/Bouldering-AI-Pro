@@ -6,7 +6,7 @@ import { GuidancePanel } from './components/GuidancePanel';
 import { ReportView } from './components/ReportView';
 import { VideoRecorder } from './components/VideoRecorder';
 import { VideoAnalysis } from './components/VideoAnalysis';
-import { RouteGuideUploader } from './components/RouteGuide';
+import { RouteGuide } from './components/RouteGuide';
 import { AnalysisResult, SessionData, HistoryEntry } from './types';
 import { Play, Square, ShieldCheck, Settings, History, Video, Camera, ChevronRight } from 'lucide-react';
 import { drawMarkers } from './utils/drawMarkers';
@@ -23,10 +23,13 @@ export default function App() {
   const [recordedVideoBlob, setRecordedVideoBlob] = useState<Blob | null>(null);
   const [recordedRawBlob, setRecordedRawBlob] = useState<Blob | null>(null);
   const [mode, setMode] = useState<'camera' | 'video'>('camera');
-  const [videoSubMode, setVideoSubMode] = useState<'route' | 'analysis'>('route');
+  const [videoSubMode, setVideoSubMode] = useState<'route' | 'analysis'>('analysis');
   const [cameraOn, setCameraOn] = useState(false);
   const [showQR, setShowQR] = useState(false);
+  const [synthesizing, setSynthesizing] = useState(false);
   const cooldownRef = useRef(false);
+  const startingRef = useRef(false); // 防快速双击开始
+  const sessionIdRef = useRef(0);     // 递增 session ID，防 stopClimb 后残留异步回调污染报告
 
   // Video 元素引用（传给 VideoRecorder 做合成录制）
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
@@ -45,14 +48,22 @@ export default function App() {
   const handleRecordingComplete = useCallback((result: { annotatedBlob: Blob; rawBlob: Blob }) => {
     setRecordedVideoBlob(result.annotatedBlob);
     setRecordedRawBlob(result.rawBlob);
+    setSynthesizing(false);
   }, []);
 
   const startClimb = () => {
+    if (startingRef.current) return; // 防快速双击
+    startingRef.current = true;
+    sessionIdRef.current += 1; // 新 session → 新 ID，丢弃旧 session 的残留异步回调
+    cooldownRef.current = false;
+
     if (!cameraOn) {
       setCameraOn(true);
       // 摄像头打开后再开始录制，给 MediaPipe 一点初始化时间
       setTimeout(() => {
         setRecordedVideoBlob(null);
+        setRecordedRawBlob(null);
+        setSynthesizing(false);
         setSession({
           startTime: Date.now(),
           totalErrors: 0,
@@ -60,10 +71,13 @@ export default function App() {
         });
         setIsRecording(true);
         setCurrentResult(null);
+        startingRef.current = false; // 解锁
       }, 1500);
       return;
     }
     setRecordedVideoBlob(null);
+    setRecordedRawBlob(null);
+    setSynthesizing(false);
     setSession({
       startTime: Date.now(),
       totalErrors: 0,
@@ -71,6 +85,7 @@ export default function App() {
     });
     setIsRecording(true);
     setCurrentResult(null);
+    startingRef.current = false;
   };
 
   // 首次访问自动弹出二维码
@@ -84,19 +99,35 @@ export default function App() {
   }, []);
 
   const stopClimb = () => {
+    startingRef.current = false; // 重置开始锁
+    sessionIdRef.current += 1; // 使当前 session 的 in-flight 请求全部失效
     setIsRecording(false);
+    setCurrentResult(null); // 清除残留标注，防止报告关闭后还在显示
     if (session) {
       setSession(prev => {
         if (!prev) return prev;
         return { ...prev, endTime: Date.now() };
       });
-      // 立即显示报告，不延迟
       setShowReport(true);
     }
   };
 
+  // ─── 卡关回调 ──────────────────────────────────────────────
+  const handleStuck = useCallback((_buffer: any[]) => {
+    console.log('[Stuck] 卡关检测触发，缓冲帧数:', _buffer.length);
+    // 后续可扩展：传给 AI 做卡关分析
+  }, []);
+
+  // ─── 掉落回调 ──────────────────────────────────────────────
+  const handleFall = useCallback((_buffer: any[]) => {
+    console.log('[Fall] 掉落检测触发，缓冲帧数:', _buffer.length);
+    // 后续可扩展：自动触发复位分析
+  }, []);
+
   const handleFrame = useCallback(async (canvas: HTMLCanvasElement, landmarksSnapshot: string = '', handSnapshot: string = '') => {
     if (!isRecording || isAnalyzing || cooldownRef.current) return;
+
+    const mySessionId = sessionIdRef.current; // 记录当前 session ID
 
     try {
       setIsAnalyzing(true);
@@ -119,6 +150,8 @@ export default function App() {
       }
 
       const result: AnalysisResult = await response.json();
+      // session ID 检查：如果这个 session 已经过期（stopClimb 了），丢弃结果
+      if (sessionIdRef.current !== mySessionId) return;
       setCurrentResult(result);
 
       // ── 岩点-手部距离分析 ───────────────────────────────
@@ -278,29 +311,25 @@ export default function App() {
           <>
             {/* Camera off: show placeholder with start button */}
             {!cameraOn ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900">
-                <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mb-6">
-                  <Camera className="w-10 h-10 text-slate-500" />
+              <div className="w-full h-full relative bg-slate-900">
+                {/* Camera Placeholder — 让开启摄像头按钮在底部固定位置 */}
+                <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-4 w-full px-8 max-w-sm">
+                  <button
+                    onClick={() => setCameraOn(true)}
+                    className="w-full bg-orange-600 hover:bg-orange-500 text-white h-16 rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-all shadow-2xl shadow-orange-600/20"
+                  >
+                    <Camera className="w-6 h-6" />
+                    <span className="font-black uppercase tracking-widest text-lg italic">开启摄像头</span>
+                  </button>
                 </div>
-                <h2 className="text-lg font-black text-white uppercase italic mb-2">准备攀爬</h2>
-                <p className="text-sm text-slate-400 mb-8 text-center px-8">
-                  开启摄像头后即可进行实时姿态检测<br />与 AI 攀爬分析
-                </p>
-                <button
-                  onClick={() => {
-                    setCameraOn(true);
-                  }}
-                  className="bg-orange-600 hover:bg-orange-500 text-white px-8 py-4 rounded-2xl font-bold text-base active:scale-95 transition-all shadow-2xl shadow-orange-600/20 flex items-center gap-3"
-                >
-                  <Camera className="w-5 h-5" />
-                  开启摄像头
-                </button>
               </div>
             ) : (
               <>
                 <CameraStream
                   onFrame={handleFrame}
                   onPoseMarkers={handlePoseMarkers}
+                  onStuck={handleStuck}
+                  onFall={handleFall}
                   isRecording={isRecording}
                   captureInterval={1800}
                   onError={setCameraError}
@@ -363,35 +392,11 @@ export default function App() {
             )}
           </>
         ) : (
-          <div className="w-full h-full flex flex-col">
-            {/* Video Submode Tabs */}
-            <div className="flex bg-slate-900 border-b border-slate-800">
-              <button
-                onClick={() => setVideoSubMode('route')}
-                className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
-                  videoSubMode === 'route'
-                    ? 'text-orange-400 border-b-2 border-orange-500'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                📷 图片路线分析
-              </button>
-              <button
-                onClick={() => setVideoSubMode('analysis')}
-                className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-all ${
-                  videoSubMode === 'analysis'
-                    ? 'text-orange-400 border-b-2 border-orange-500'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                🎬 视频分析
-              </button>
-            </div>
-            {/* Content */}
+          <div className="w-full h-full pt-14 flex flex-col">
             {videoSubMode === 'route' ? (
-              <RouteGuideUploader />
+              <RouteGuide onBack={() => setVideoSubMode('analysis')} />
             ) : (
-              <VideoAnalysis />
+              <VideoAnalysis onOpenRouteGuide={() => setVideoSubMode('route')} />
             )}
           </div>
         )}
@@ -407,14 +412,7 @@ export default function App() {
               <Play className="w-6 h-6 fill-current" />
               <span className="font-black uppercase tracking-widest text-lg italic">开始攀爬</span>
             </button>
-            <div className="flex gap-4 w-full">
-               <button className="flex-1 bg-slate-900 border border-slate-800 h-14 rounded-2xl flex items-center justify-center text-slate-400 active:scale-95 transition-transform">
-                  <History className="w-5 h-5" />
-               </button>
-               <button className="flex-1 bg-slate-900 border border-slate-800 h-14 rounded-2xl flex items-center justify-center text-slate-400 active:scale-95 transition-transform">
-                  <Settings className="w-5 h-5" />
-               </button>
-            </div>
+            {/* 历史记录和设置按钮暂隐藏 */}
           </div>
         )}
 
@@ -468,9 +466,11 @@ export default function App() {
             data={session}
             recordedVideo={recordedVideoBlob}
             recordedRawBlob={recordedRawBlob}
+            synthesizing={synthesizing}
             onReset={() => {
               setShowReport(false);
               setRecordedVideoBlob(null);
+              setRecordedRawBlob(null);
             }}
           />
         )}
